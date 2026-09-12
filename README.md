@@ -217,3 +217,15 @@ For more information checkout the AMAZING community thread available on
   - Reduced log error level for failed update form hub to warning
 
 A full change log can be seen on our wiki [here](https://github.com/asantaga/wiserHomeAssistantPlatform/wiki/Full-Change-Log)
+
+### Zigbee card release packaging
+
+The Publish workflow downloads `wiser-zigbee-card.js` from published releases of `andyblac/wiser-zigbee-card` into `frontend` in a staged copy of the integration before creating `wiser.zip`. Other bundled cards are unchanged. Prerelease integration builds use the newest Zigbee prerelease, falling back to the newest stable release if none exists; stable integration builds use only stable Zigbee releases. Missing releases or assets fail the build rather than silently using old files.
+
+Manual runs of **Actions → Publish** let you select `dev` or `stable` and download the `wiser-package` artifact without publishing a release. Set repository variable `WISER_ZIGBEE_CARD_REPOSITORY` to override the card repository. The package includes `frontend/zigbee-release.json` recording the selected tag, asset ID, URL and SHA-256 digest. Tracked frontend files remain available for direct repository installations.
+
+Preview selection locally without downloading or changing files:
+
+```sh
+python3 scripts/fetch_zigbee_release.py --channel dev --plan
+```
