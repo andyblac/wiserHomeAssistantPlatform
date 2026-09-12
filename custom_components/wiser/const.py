@@ -11,6 +11,8 @@ VERSION = "3.4.21b0"
 DOMAIN = "wiser"
 DATA_WISER_CONFIG = "wiser_config"
 URL_BASE = "/wiser"
+CONF_SHOW_ZIGBEE_SIDEBAR = "show_zigbee_sidebar"
+CONF_ZIGBEE_PANEL_CONFIG = "zigbee_panel_config"
 
 JSMODULES = [
     {
@@ -21,7 +23,6 @@ JSMODULES = [
     {
         "name": "Wiser Zigbee Card",
         "filename": "wiser-zigbee-card.js",
-        "version": "2.1.2",
     },
 ]
 

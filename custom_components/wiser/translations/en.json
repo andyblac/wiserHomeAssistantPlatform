@@ -48,6 +48,7 @@
         "title": "Wiser Integration Options",
         "description": "Main Parameters",
         "data": {
+          "show_zigbee_sidebar": "Show Wiser Zigbee in sidebar",
           "host": "IP Address or Hostname",
           "port": "Port number",
           "scan_interval": "Scan Interval (secs)",

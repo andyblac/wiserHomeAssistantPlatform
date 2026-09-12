@@ -48,6 +48,9 @@ from .helpers import (
     get_legacy_room_identifier,
 )
 from .services import async_setup_services
+from .frontend.zigbee_sidebar import (
+    async_handle_entry_update, async_update_zigbee_panel, integration_reload_settings,
+)
 from .websockets import async_register_websockets
 
 _LOGGER = logging.getLogger(__name__)
@@ -184,6 +187,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry):
     hass.data[DOMAIN][config_entry.entry_id] = {
         DATA: coordinator,
         UPDATE_LISTENER: update_listener,
+        "reload_settings": integration_reload_settings(config_entry),
     }
 
     update_hub_device_names(hass)
@@ -219,6 +223,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry):
     # Register custom cards
     moodule_register = JSModuleRegistration(hass)
     await moodule_register.async_register()
+    await async_update_zigbee_panel(hass)
 
     _LOGGER.info(
         "Wiser Component Setup Completed (%s)", coordinator.wiserhub.system.name
@@ -316,7 +321,7 @@ def update_hub_device_names(hass: HomeAssistant):
 
 async def _async_update_listener(hass: HomeAssistant, config_entry):
     """Handle options update."""
-    await hass.config_entries.async_reload(config_entry.entry_id)
+    await async_handle_entry_update(hass, config_entry)
 
 
 async def async_remove_config_entry_device(
@@ -369,5 +374,6 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     if unload_ok:
         hass.data[DOMAIN].pop(config_entry.entry_id)
         update_hub_device_names(hass)
+        await async_update_zigbee_panel(hass)
 
     return unload_ok

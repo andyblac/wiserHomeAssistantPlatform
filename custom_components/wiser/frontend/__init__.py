@@ -78,13 +78,12 @@ class JSModuleRegistration:
         for module in JSMODULES:
             url = f"{URL_BASE}/{module.get('filename')}"
 
-            version = module["version"]
             if module["filename"] == "wiser-zigbee-card.js":
                 version = await self.hass.async_add_executor_job(
-                    zigbee_card_version,
-                    Path(__file__).parent / module["filename"],
-                    version,
+                    zigbee_card_version, Path(__file__).parent / module["filename"]
                 )
+            else:
+                version = module["version"]
 
             card_registered = False
 
