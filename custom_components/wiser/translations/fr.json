@@ -226,6 +226,7 @@
   "entity": {
     "update": {
       "schedule_card": { "name": "Carte des programmes Wiser" },
+      "rooms_card": { "name": "Carte des pièces Wiser" },
       "zigbee_card": { "name": "Carte Zigbee Wiser" }
     },
     "climate": {

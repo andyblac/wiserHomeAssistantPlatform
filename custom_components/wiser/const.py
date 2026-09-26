@@ -19,6 +19,10 @@ CONF_ZIGBEE_PANEL_CONFIG = "zigbee_panel_config"
 
 JSMODULES = [
     {
+        "name": "Wiser Rooms Card",
+        "filename": "wiser-rooms-card.js",
+    },
+    {
         "name": "Wiser Schedule Card",
         "filename": "wiser-schedule-card.js",
     },

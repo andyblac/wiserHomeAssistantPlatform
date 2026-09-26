@@ -42,11 +42,13 @@ jobs:
           CARD_CHANNEL: ${{ github.event_name == 'release' && (github.event.release.prerelease && 'dev' || 'stable') || inputs.channel || 'dev' }}
           SCHEDULE_REPOSITORY: ${{ vars.WISER_SCHEDULE_CARD_REPOSITORY || 'andyblac/wiser-schedule-card' }}
           ZIGBEE_REPOSITORY: ${{ vars.WISER_ZIGBEE_CARD_REPOSITORY || 'andyblac/wiser-zigbee-card' }}
+          ROOMS_REPOSITORY: ${{ vars.WISER_ROOMS_CARD_REPOSITORY || 'andyblac/wiser-rooms-card' }}
         run: >-
           python scripts/build.py --release
           --channel "$CARD_CHANNEL"
           --schedule-repository "$SCHEDULE_REPOSITORY"
           --zigbee-repository "$ZIGBEE_REPOSITORY"
+          --rooms-repository "$ROOMS_REPOSITORY"
       - name: Upload release package for inspection
         uses: actions/upload-artifact@v7
         with:

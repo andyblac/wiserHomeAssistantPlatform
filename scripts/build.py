@@ -53,12 +53,13 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "dist/wiser.zip")
     parser.add_argument("--schedule-repository", default=CARD_REPOSITORIES["schedule"])
     parser.add_argument("--zigbee-repository", default=CARD_REPOSITORIES["zigbee"])
+    parser.add_argument("--rooms-repository", default=CARD_REPOSITORIES["rooms"])
     args = parser.parse_args()
     try:
         report = build(
             ROOT / "custom_components/wiser", args.output, args.local_root,
             args.channel,
-            {"schedule": args.schedule_repository, "zigbee": args.zigbee_repository},
+            {"schedule": args.schedule_repository, "zigbee": args.zigbee_repository, "rooms": args.rooms_repository},
             release=args.release,
         )
     except Exception as error:

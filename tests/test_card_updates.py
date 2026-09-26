@@ -119,6 +119,15 @@ class CardUpdatesTest(unittest.IsolatedAsyncioTestCase):
         })()
         return context
 
+    def test_rooms_release_is_validated_and_cached_independently(self):
+        release = self.updates._validate_release("rooms", self.metadata("rooms"))
+        contents = self.payload("rooms")
+        self.updates._validate_download("rooms", release, contents)
+        self.files.store_card(self.directory, "wiser-rooms-card.js", "2.0.0", contents)
+        path, _, version = self.files.resolve_card(self.directory, "wiser-rooms-card.js", self.version_reader)
+        self.assertEqual(path.read_bytes(), contents)
+        self.assertEqual(version, "2.0.0")
+
     def test_persistent_cache_survives_restart_and_newer_bundle_takes_precedence(self):
         contents = self.payload()
         self.files.store_card(self.directory, "wiser-zigbee-card.js", "2.0.0", contents)
@@ -208,11 +217,16 @@ class CardUpdatesTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_network_failure_does_not_block_other_card_or_hub_setup(self):
         import aiohttp
-        self.session.get.side_effect = [self.response(error=aiohttp.ClientError("offline")), self.response(json_data=self.metadata())]
+        self.session.get.side_effect = [
+            self.response(error=aiohttp.ClientError("offline")),
+            self.response(json_data=self.metadata()),
+            self.response(json_data=self.metadata("rooms")),
+        ]
         with self.assertLogs("card_update_test.update", level="WARNING"):
             await self.coordinator.async_refresh()
         self.assertIsNone(self.coordinator.data["schedule"]["release"])
         self.assertEqual(self.coordinator.data["zigbee"]["release"]["version"], "2.0.0")
+        self.assertEqual(self.coordinator.data["rooms"]["release"]["version"], "2.0.0")
         self.assertEqual(self.coordinator.options["update_interval"], timedelta(hours=24))
 
     async def test_check_does_not_install_until_user_requests_it(self):
@@ -317,12 +331,12 @@ class CardUpdatesTest(unittest.IsolatedAsyncioTestCase):
         await self.updates.async_setup_entry(self.hass, SimpleNamespace(entry_id="first"), first)
         await self.updates.async_setup_entry(self.hass, SimpleNamespace(entry_id="second"), second)
         self.coordinator.async_refresh.assert_awaited_once()
-        self.assertEqual(len(first.call_args.args[0]), 2)
+        self.assertEqual(len(first.call_args.args[0]), 3)
         second.assert_not_called()
         self.registry.async_get_entity_id.side_effect = lambda domain, platform, unique_id: f"update.{unique_id}"
         await self.updates.async_unload_card_updates(self.hass, SimpleNamespace(entry_id="first"))
         self.assertEqual(self.coordinator.owner, "second")
-        self.assertEqual(len(second.call_args.args[0]), 2)
+        self.assertEqual(len(second.call_args.args[0]), 3)
         self.assertEqual(self.registry.async_update_entity.call_args.kwargs["config_entry_id"], "second")
         await self.updates.async_unload_card_updates(self.hass, SimpleNamespace(entry_id="second"))
         self.coordinator.async_shutdown.assert_awaited_once()

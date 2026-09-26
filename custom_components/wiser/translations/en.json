@@ -226,6 +226,7 @@
   "entity": {
     "update": {
       "schedule_card": { "name": "Wiser Schedules Card" },
+      "rooms_card": { "name": "Wiser Rooms Card" },
       "zigbee_card": { "name": "Wiser Zigbee Card" }
     },
     "climate": {

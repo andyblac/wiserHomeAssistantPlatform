@@ -30,6 +30,7 @@ _HACS_REPOSITORY_ID = "159080189"
 _CARDS = {
     "schedule": ("andyblac/wiser-schedule-card", "wiser-schedule-card.js", "wiser-schedules-panel"),
     "zigbee": ("andyblac/wiser-zigbee-card", "wiser-zigbee-card.js", "wiser-zigbee-panel"),
+    "rooms": ("andyblac/wiser-rooms-card", "wiser-rooms-card.js", "wiser-rooms-card"),
 }
 
 

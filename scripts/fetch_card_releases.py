@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 CARD_REPOSITORIES = {
     "schedule": "andyblac/wiser-schedule-card",
     "zigbee": "andyblac/wiser-zigbee-card",
+    "rooms": "andyblac/wiser-rooms-card",
 }
 
 
@@ -102,11 +103,13 @@ def fetch_cards(channel, output_dir, repositories, plan=False, local_root=None):
         if not plan:
             if not contents or contents.lstrip().lower().startswith((b"<!doctype html", b"<html")):
                 raise ValueError(f"Invalid JavaScript bundle: {filename}")
-            panel_file, component = {
+            panel = {
                 "schedule": ("schedules_sidebar.py", b"wiser-schedules-panel"),
                 "zigbee": ("zigbee_sidebar.py", b"wiser-zigbee-panel"),
-            }[card]
-            if (output_dir / panel_file).exists() and component not in contents:
+            }.get(card)
+            if card == "rooms" and b"wiser-rooms-card" not in contents:
+                raise ValueError("Selected rooms card does not include wiser-rooms-card")
+            if panel and (output_dir / panel[0]).exists() and panel[1] not in contents:
                 raise ValueError(f"Selected {card} card does not include the sidebar panel required by this integration")
             payloads[filename] = contents
         report.append(record)
@@ -126,12 +129,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--channel", choices=["dev", "stable"], required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("dist/wiser/frontend"))
-    parser.add_argument("--card", choices=["schedule", "zigbee", "all"], default="all")
+    parser.add_argument("--card", choices=["schedule", "zigbee", "rooms", "all"], default="all")
     parser.add_argument("--schedule-repository", default=CARD_REPOSITORIES["schedule"])
     parser.add_argument("--zigbee-repository", default=CARD_REPOSITORIES["zigbee"])
+    parser.add_argument("--rooms-repository", default=CARD_REPOSITORIES["rooms"])
     parser.add_argument("--plan", action="store_true", help="Show selected releases without downloading or writing files")
     args = parser.parse_args()
-    repositories = {"schedule": args.schedule_repository, "zigbee": args.zigbee_repository}
+    repositories = {"schedule": args.schedule_repository, "zigbee": args.zigbee_repository, "rooms": args.rooms_repository}
     if args.card != "all":
         repositories = {args.card: repositories[args.card]}
     try:
