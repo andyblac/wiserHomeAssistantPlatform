@@ -49,8 +49,7 @@
         "title": "UI options",
         "data": {
           "legacy_naming": "Legacy naming",
-          "show_schedules_sidebar": "Show Wiser Schedules in sidebar",
-          "show_zigbee_sidebar": "Show Wiser Zigbee in sidebar"
+          "show_wiser_sidebar": "Show Wiser in sidebar"
         },
         "data_description": {
           "legacy_naming": "Include room names in Wiser device names. If enabled, using Home Assistant to regenerate entity IDs with the default format in Settings → System → Entity ID format (Home Assistant 2026.8 and later) will duplicate area names when the area and Wiser room names match. Changing this option does not rename existing entity IDs."
@@ -226,8 +225,8 @@
   "entity": {
     "update": {
       "schedule_card": { "name": "Wiser Schedules Card" },
-      "rooms_card": { "name": "Wiser Rooms Card" },
-      "zigbee_card": { "name": "Wiser Zigbee Card" }
+      "zigbee_card": { "name": "Wiser Zigbee Card" },
+      "rooms_card": { "name": "Wiser Rooms Card" }
     },
     "climate": {
       "heating": {
@@ -319,27 +318,9 @@
       "signal": { "name": "Signal" },
       "cloud": { "name": "Cloud" },
       "heating_operation_mode": { "name": "Heating operation mode" },
-      "heating": {
-        "name": "Heating",
-        "state": {
-          "off": "Off",
-          "on": "On"
-        }
-      },
-      "heating_channel": {
-        "name": "Heating channel {channel}",
-        "state": {
-          "off": "Off",
-          "on": "On"
-        }
-      },
-      "hot_water": {
-        "name": "Hot water",
-        "state": {
-          "off": "Off",
-          "on": "On"
-        }
-      },
+      "heating": { "name": "Heating" },
+      "heating_channel": { "name": "Heating channel {channel}" },
+      "hot_water": { "name": "Hot water" },
       "hot_water_operation_mode": { "name": "Hot water operation mode" },
       "target_temperature": { "name": "Target temperature" },
       "floor_temperature": { "name": "Floor temperature" },

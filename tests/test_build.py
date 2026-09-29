@@ -29,10 +29,16 @@ class BuildTest(unittest.TestCase):
         frontend.mkdir(parents=True)
         self.output = self.root / "dist/wiser.zip"
         self.payloads = {
-            "schedule": b"// local wiser-schedules-panel",
-            "zigbee": b"// local wiser-zigbee-panel",
-            "rooms": b"// local wiser-rooms-card",
+            "schedule": b'customElements.define("wiser-schedule-card",class{});customElements.define("wiser-schedules-panel",class{})',
+            "zigbee": b'customElements.define("wiser-zigbee-card",class{});customElements.define("wiser-zigbee-panel",class{})',
+            "rooms": (
+                b'customElements.define("wiser-rooms-card",class{});'
+                b'customElements.define("wiser-rooms-panel",class{})'
+            ),
         }
+        (frontend / "cards.json").write_text(
+            json.dumps(FETCH.CARD_MANIFEST), encoding="utf-8"
+        )
         for card, panel in (("schedule", "schedules"), ("zigbee", "zigbee")):
             (frontend / f"{panel}_sidebar.py").touch()
             (frontend / f"wiser-{card}-card.js").write_bytes(b"old tracked bundle")
@@ -92,6 +98,7 @@ class BuildTest(unittest.TestCase):
 
     def test_failed_fallback_keeps_previous_package(self):
         self.local("schedule")
+        self.local("rooms")
         self.output.parent.mkdir()
         self.output.write_bytes(b"previous package")
         with patch.object(FETCH, "list_releases", side_effect=ValueError("unavailable")):
@@ -100,7 +107,7 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(self.output.read_bytes(), b"previous package")
 
     def test_invalid_local_bundle_fails_instead_of_using_old_tracked_card(self):
-        self.local("schedule").write_bytes(b"old card without panel")
+        self.local("schedule").write_bytes(b"wiser-schedule-card without panel")
         with patch.object(FETCH, "list_releases") as releases:
             with self.assertRaisesRegex(ValueError, "does not include the sidebar panel"):
                 self.build()
@@ -112,14 +119,21 @@ class BuildTest(unittest.TestCase):
             self.local(card)
         for channel, explicit_release in (("dev", True), ("stable", True), ("stable", False)):
             with self.subTest(channel=channel, explicit_release=explicit_release):
-                with patch.object(FETCH, "list_releases", side_effect=[
+                with patch.object(BUILD, "fetch_panel_config", return_value=(
+                    FETCH.CARD_MANIFEST,
+                    {"repository": FETCH.PANEL_CONFIG_REPOSITORY, "source": "release"},
+                )), patch.object(FETCH, "list_releases", side_effect=[
                     [release("v1", "2026", card="schedule")],
                     [release("v2", "2026", card="zigbee")],
                     [release("v3", "2026", card="rooms")],
                 ]), patch.object(FETCH, "download_asset", side_effect=[
-                    (b"// published wiser-schedules-panel", "sha256:schedule"),
-                    (b"// published wiser-zigbee-panel", "sha256:zigbee"),
-                    (b"// published wiser-rooms-card", "sha256:rooms"),
+                    (self.payloads["schedule"], "sha256:schedule"),
+                    (self.payloads["zigbee"], "sha256:zigbee"),
+                    (
+                        b'customElements.define("wiser-rooms-card",class{});'
+                        b'customElements.define("wiser-rooms-panel",class{})',
+                        "sha256:rooms",
+                    ),
                 ]) as download:
                     report = BUILD.build(
                         self.source, self.output, self.root, channel,
@@ -130,9 +144,20 @@ class BuildTest(unittest.TestCase):
                 with ZipFile(self.output) as archive:
                     self.assertEqual(
                         archive.read("frontend/wiser-zigbee-card.js"),
-                        b"// published wiser-zigbee-panel",
+                        self.payloads["zigbee"],
                     )
-                    self.assertEqual(archive.read("frontend/wiser-rooms-card.js"), b"// published wiser-rooms-card")
+                    self.assertEqual(
+                        json.loads(archive.read("frontend/cards.json")),
+                        FETCH.CARD_MANIFEST,
+                    )
+                    self.assertEqual(
+                        json.loads(archive.read("frontend/panel-config-release.json"))["source"],
+                        "release",
+                    )
+                    self.assertEqual(
+                        archive.read("frontend/wiser-rooms-card.js"),
+                        self.payloads["rooms"],
+                    )
 
     def test_release_failure_does_not_fall_back_to_local_bundles(self):
         for card in self.payloads:
