@@ -89,6 +89,7 @@ SETPOINT_MODE_BOOST = "boost"
 SETPOINT_MODE_BOOST_AUTO = "boost auto mode only"
 
 # Custom Configs
+CONF_ADDITIONAL_SENSORS = "additional_sensors"
 CONF_AUTOMATIONS_PASSIVE = "automations_passive_mode"
 CONF_AUTOMATIONS_PASSIVE_TEMP_INCREMENT = "passive_mode_temperature_increments"
 CONF_HEATING_BOOST_TEMP = "heating_boost_temp"
@@ -115,6 +116,7 @@ CONF_OPENTHERM_HOT_WATER_SENSOR_ENTITY_ID = (
 )
 CONF_OPENTHERM_HOT_WATER_PRESETS = "opentherm_hot_water_presets"
 CONF_EQUIPMENT_SENSORS = "equipment_sensors"
+CONF_SCHEDULE_SETPOINT_ROOMS = "schedule_setpoint_rooms"
 OPENTHERM_HOT_WATER_SCHEDULE = "opentherm_hot_water_schedule"
 
 DEFAULT_OPENTHERM_HOT_WATER_MANUAL_TEMP = 45.0
