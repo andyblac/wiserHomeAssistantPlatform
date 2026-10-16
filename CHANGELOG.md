@@ -13,7 +13,9 @@ For releases before v3.3.5, see the [Full Change Log](https://github.com/asantag
 
 ### Added
 
-- Added External Passive Mode, allowing external Home Assistant climate TRVs to be assigned to Wiser rooms and controlled with the existing passive temperature-range behaviour without contributing Wiser heat demand.
+- Added External Room Control, allowing external Home Assistant climate devices to follow their Wiser room normally and use its Passive Mode strategy when enabled.
+- Added selectable modulating and temperature-limiter strategies to native Passive Mode.
+- Migrated existing native Passive Mode enablement, temperature increments, lower schedules, and active lower overrides to the new configuration; experimental external-control settings are intentionally not migrated.
 - Added optional Wiser-only OpenTherm domestic-hot-water control with a Home Assistant water-heater entity, configurable temperature and presets, an optional external current-temperature sensor, icon mode controls, and an integration-owned weekly schedule managed from the Wiser Schedules panel. Non-timed presets can be used in schedule periods; temporary boost presets remain manual actions.
 - Manage frontend definitions in the integration's bundled `cards.json`, with independent card and panel installation, offline caching, and a generic panel-settings API.
 
