@@ -77,10 +77,19 @@
         "sections": {
           "automations_passive_mode": {
             "name": "Mode passif",
-            "description": "Active la fonction TRV passive. Elle doit être activée individuellement pour chaque pièce.",
+            "description": "Active le mode passif et choisit s’il contrôle les appareils Wiser internes ou les appareils climatiques externes affectés.",
             "data": {
               "automations_passive_mode": "Mode passif",
-              "passive_mode_temperature_increments": "Incréments de température du mode passif"
+              "passive_type": "Type",
+              "temperature_increment": "Incrément de température",
+              "control_strategy": "Stratégie de contrôle"
+            }
+          },
+          "automations_external_room_control": {
+            "name": "Contrôle externe de la pièce",
+            "description": "Affectez les appareils de climatisation externes à leur pièce Wiser afin qu’ils suivent la consigne actuelle de la pièce, avec ou sans mode passif.",
+            "data": {
+              "automations_external_room_control": "Contrôle externe de la pièce"
             }
           },
           "hotwater_climate": {
@@ -219,6 +228,10 @@
         }
       }
     },
+    "error": {
+      "external_climate_must_not_be_wiser": "Sélectionnez une entité de climatisation externe. Une entité Wiser ne peut pas être contrôlée comme un appareil externe.",
+      "external_climate_duplicate_assignment": "Une entité de climatisation externe ne peut être attribuée qu’à une seule pièce Wiser."
+    },
     "abort": {
       "opentherm_not_available": "Les données OpenTherm ne sont pas disponibles pour cette passerelle Wiser.",
       "equipment_not_available": "Les données des équipements ne sont pas disponibles pour cette passerelle Wiser."
@@ -245,6 +258,18 @@
     }
   },
   "selector": {
+    "passive_mode_type": {
+      "options": {
+        "internal": "Interne",
+        "external": "Externe"
+      }
+    },
+    "room_control_strategy": {
+      "options": {
+        "modulating": "Modulant",
+        "temperature_limiter": "Limiteur de température"
+      }
+    },
     "opentherm_parameter": {
       "options": {
         "chFlowActiveLowerSetpoint": "Consigne basse active du chauffage central",

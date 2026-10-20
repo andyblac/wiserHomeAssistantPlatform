@@ -29,11 +29,13 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult, section
+from homeassistant.helpers import area_registry as ar, entity_registry as er
 from homeassistant.helpers.selector import (
     BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
     SELECTORS,
+    SelectSelector,
     SelectSelectorMode,
     Selector,
     make_selector_config_schema,
@@ -50,9 +52,12 @@ from .const import (
     CONF_AUTOMATIONS_HW_HEAT_MODE,
     CONF_AUTOMATIONS_HW_SENSOR_ENTITY_ID,
     CONF_AUTOMATIONS_PASSIVE,
-    CONF_AUTOMATIONS_PASSIVE_TEMP_INCREMENT,
-    CONF_SCHEDULE_SETPOINT_ROOMS,
+    CONF_AUTOMATIONS_PASSIVE_TYPE,
+    CONF_TEMPERATURE_INCREMENT,
+    CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL,
+    CONF_CONTROL_STRATEGY,
     CONF_EQUIPMENT_SENSORS,
+    CONF_EXTERNAL_ROOM_CONTROL_ASSIGNMENTS,
     CONF_HEATING_BOOST_TEMP,
     CONF_HEATING_BOOST_TIME,
     CONF_HOSTNAME,
@@ -64,12 +69,19 @@ from .const import (
     CONF_OPENTHERM_HOT_WATER_SENSOR_ENTITY_ID,
     CONF_OPENTHERM_SENSORS,
     CONF_RESTORE_MANUAL_TEMP_OPTION,
+    CONF_SCHEDULE_SETPOINT_ROOMS,
     CONF_SETPOINT_MODE,
     CONF_SHOW_WISER_SIDEBAR,
     CUSTOM_DATA_STORE,
     DEFAULT_BOOST_TEMP,
     DEFAULT_BOOST_TEMP_TIME,
     DEFAULT_PASSIVE_TEMP_INCREMENT,
+    DEFAULT_PASSIVE_TYPE,
+    PASSIVE_TYPE_EXTERNAL,
+    PASSIVE_TYPE_INTERNAL,
+    PASSIVE_TYPES,
+    CONTROL_STRATEGIES,
+    DEFAULT_PASSIVE_CONTROL_STRATEGY,
     DEFAULT_OPENTHERM_HOT_WATER_MANUAL_TEMP,
     DEFAULT_OPENTHERM_HOT_WATER_PRESET_TEMP,
     DEFAULT_SCAN_INTERVAL,
@@ -96,6 +108,53 @@ from .opentherm_detection import (
 from .helpers import room_has_climate
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _external_room_control_duplicate_entities(assignments):
+    """Return external climate entities assigned to more than one room."""
+    assigned_rooms = {}
+    for room_id, entity_ids in assignments.items():
+        for entity_id in entity_ids:
+            assigned_rooms.setdefault(entity_id, set()).add(room_id)
+    return {
+        entity_id
+        for entity_id, room_ids in assigned_rooms.items()
+        if len(room_ids) > 1
+    }
+
+
+def _passive_types_for_assignments(assignments, external_control_enabled):
+    """Return Passive Mode types supported by the current assignments."""
+    if external_control_enabled and any(assignments.values()):
+        return PASSIVE_TYPES
+    return [PASSIVE_TYPE_INTERNAL]
+
+
+class ConditionalSelectSelector(SelectSelector):
+    """Select selector with a frontend field-visibility condition."""
+
+    def __init__(self, config, visible):
+        """Initialise the selector and its visibility condition."""
+        super().__init__(config)
+        self._visible = visible
+
+    def serialize(self):
+        """Serialize the selector with a top-level visibility condition."""
+        serialized = super().serialize()
+        serialized["visible"] = self._visible
+        return serialized
+
+
+class CompactSelectSelector(SelectSelector):
+    """Select selector rendered as a compact option box by the frontend."""
+
+    def serialize(self):
+        """Request the frontend's horizontal option-box presentation."""
+        serialized = super().serialize()
+        select_config = serialized["selector"]["select"]
+        select_config["mode"] = "box"
+        select_config["box_max_columns"] = 2
+        return serialized
 
 
 def _default_opentherm_hot_water_presets(minimum=35.0, maximum=55.0):
@@ -224,7 +283,7 @@ class WiserFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """
 
     VERSION = 1
-    MINOR_VERSION = 5
+    MINOR_VERSION = 6
     CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
 
     def __init__(self) -> None:
@@ -426,6 +485,60 @@ class WiserOptionsFlowHandler(config_entries.OptionsFlow):
             step_id="init",
             menu_options=menu_options,
         )
+
+    def _wiser_rooms(self):
+        """Return Wiser rooms available to the loaded config entry."""
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        if not entry_data:
+            return []
+        return entry_data[DATA].wiserhub.rooms.all
+
+    def _external_room_control_room_fields(self):
+        """Return unique form field labels mapped to Wiser room IDs."""
+        rooms = sorted(
+            self._wiser_rooms(),
+            key=lambda room: (room.name.casefold(), room.name, str(room.id)),
+        )
+        name_counts = {
+            room.name: sum(other.name == room.name for other in rooms)
+            for room in rooms
+        }
+        return {
+            (
+                room.name
+                if name_counts[room.name] == 1
+                else f"{room.name} ({room.id})"
+            ): str(room.id)
+            for room in rooms
+        }
+
+    def _external_room_control_entities_by_room(self):
+        """Return external climate entities in each Wiser room's HA area."""
+        entity_registry = er.async_get(self.hass)
+        area_registry = ar.async_get(self.hass)
+        entries = list(entity_registry.entities.values())
+        entities_by_room = {}
+        for room in self._wiser_rooms():
+            area = area_registry.async_get_area_by_name(room.name)
+            entities_by_room[str(room.id)] = sorted(
+                entry.entity_id
+                for entry in entries
+                if area is not None
+                and entry.platform != DOMAIN
+                and entry.entity_id.startswith("climate.")
+                and er.async_get_effective_area_id(self.hass, entry) == area.id
+            )
+        return entities_by_room
+
+    def _external_room_control_form_rooms(self):
+        """Return form rooms that have at least one eligible external entity."""
+        entities_by_room = self._external_room_control_entities_by_room()
+        room_fields = {
+            field_name: room_id
+            for field_name, room_id in self._external_room_control_room_fields().items()
+            if entities_by_room.get(room_id)
+        }
+        return room_fields, entities_by_room
 
     async def async_step_opentherm(self, user_input=None):
         """Choose an OpenTherm feature to configure."""
@@ -749,44 +862,224 @@ class WiserOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_automation_params(self, user_input=None):
         """Automation options."""
+        saved_external_options = dict(
+            self.config_entry.options.get(CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL, {})
+        )
+        saved_assignments = {
+            str(room_id): list(entity_ids)
+            for room_id, entity_ids in saved_external_options.get(
+                CONF_EXTERNAL_ROOM_CONTROL_ASSIGNMENTS, {}
+            ).items()
+        }
+        if user_input is not None and CONF_AUTOMATIONS_PASSIVE in user_input:
+            user_input = dict(user_input)
+            submitted_passive = dict(user_input[CONF_AUTOMATIONS_PASSIVE])
+            previous_passive = self.config_entry.options.get(
+                CONF_AUTOMATIONS_PASSIVE, {}
+            )
+            if not isinstance(previous_passive, dict):
+                previous_passive = {}
+            if (
+                submitted_passive.get(CONF_AUTOMATIONS_PASSIVE_TYPE)
+                == PASSIVE_TYPE_EXTERNAL
+            ):
+                if (
+                    previous_passive.get(CONF_AUTOMATIONS_PASSIVE_TYPE)
+                    == PASSIVE_TYPE_EXTERNAL
+                    and CONF_CONTROL_STRATEGY in previous_passive
+                ):
+                    submitted_passive.setdefault(
+                        CONF_CONTROL_STRATEGY,
+                        previous_passive[CONF_CONTROL_STRATEGY],
+                    )
+                else:
+                    submitted_passive.setdefault(
+                        CONF_CONTROL_STRATEGY,
+                        DEFAULT_PASSIVE_CONTROL_STRATEGY,
+                    )
+            else:
+                submitted_passive.pop(CONF_CONTROL_STRATEGY, None)
+            if (
+                CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL not in user_input
+                and (
+                    not saved_external_options.get(
+                        CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL, False
+                    )
+                    or not any(saved_assignments.values())
+                )
+            ):
+                submitted_passive[CONF_AUTOMATIONS_PASSIVE_TYPE] = (
+                    PASSIVE_TYPE_INTERNAL
+                )
+                submitted_passive.pop(CONF_CONTROL_STRATEGY, None)
+            user_input[CONF_AUTOMATIONS_PASSIVE] = submitted_passive
+        if (
+            user_input is not None
+            and CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL not in user_input
+        ):
+            return self.async_create_entry(
+                data=self.config_entry.options | user_input
+            )
+
+        room_fields, external_entities_by_room = (
+            self._external_room_control_form_rooms()
+        )
+        display_external_options = saved_external_options
+        display_assignments = saved_assignments
+        errors = {}
         if user_input is not None:
-            options = self.config_entry.options | user_input
-            return self.async_create_entry(data=options)
+            display_external_options = dict(
+                user_input.get(CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL, {})
+            )
+            external_options = dict(display_external_options)
+            assignments = {}
+            registry = er.async_get(self.hass)
+            for field_name, room_id in room_fields.items():
+                entity_ids = list(external_options.pop(field_name, []))
+                if any(
+                    (entry := registry.async_get(entity_id)) is not None
+                    and entry.platform == DOMAIN
+                    for entity_id in entity_ids
+                ):
+                    errors["base"] = "external_climate_must_not_be_wiser"
+                if entity_ids:
+                    assignments[room_id] = entity_ids
+            display_assignments = assignments
+
+            if _external_room_control_duplicate_entities(assignments):
+                errors["base"] = "external_climate_duplicate_assignment"
+
+            if not errors:
+                external_options[CONF_EXTERNAL_ROOM_CONTROL_ASSIGNMENTS] = assignments
+                user_input = dict(user_input)
+                user_input[CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL] = external_options
+                submitted_passive = dict(
+                    user_input.get(CONF_AUTOMATIONS_PASSIVE, {})
+                )
+                if not external_options.get(
+                    CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL, False
+                ) or not assignments:
+                    submitted_passive[CONF_AUTOMATIONS_PASSIVE_TYPE] = (
+                        PASSIVE_TYPE_INTERNAL
+                    )
+                    submitted_passive.pop(CONF_CONTROL_STRATEGY, None)
+                    user_input[CONF_AUTOMATIONS_PASSIVE] = submitted_passive
+                options = self.config_entry.options | user_input
+                return self.async_create_entry(data=options)
 
         options = self.config_entry.options
         additional_sensor_options = options.get(CONF_ADDITIONAL_SENSORS, {})
         if not isinstance(additional_sensor_options, dict):
             additional_sensor_options = {}
 
+        external_section_schema = {
+            vol.Optional(
+                CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL,
+                default=display_external_options.get(
+                    CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL, False
+                ),
+            ): bool,
+        }
+        for field_name, room_id in room_fields.items():
+            external_section_schema[
+                vol.Optional(
+                    field_name,
+                    default=display_external_options.get(
+                        field_name, saved_assignments.get(room_id, [])
+                    ),
+                )
+            ] = EntitySelector(
+                EntitySelectorConfig(
+                    domain="climate",
+                    multiple=True,
+                    include_entities=external_entities_by_room.get(room_id, []),
+                )
+            )
+
+        passive_options = dict(options.get(CONF_AUTOMATIONS_PASSIVE, {}))
+        if user_input is not None:
+            passive_options = dict(
+                user_input.get(CONF_AUTOMATIONS_PASSIVE, passive_options)
+            )
+        passive_enabled = passive_options.get(CONF_AUTOMATIONS_PASSIVE, False)
+        passive_types = _passive_types_for_assignments(
+            display_assignments,
+            display_external_options.get(
+                CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL, False
+            ),
+        )
+        selected_passive_type = passive_options.get(
+            CONF_AUTOMATIONS_PASSIVE_TYPE, DEFAULT_PASSIVE_TYPE
+        )
+        if selected_passive_type not in passive_types:
+            selected_passive_type = PASSIVE_TYPE_INTERNAL
+        passive_section_schema = {
+            vol.Optional(
+                CONF_AUTOMATIONS_PASSIVE,
+                default=passive_enabled,
+            ): bool,
+        }
+        if len(passive_types) > 1:
+            passive_section_schema[
+                vol.Optional(
+                    CONF_AUTOMATIONS_PASSIVE_TYPE,
+                    default=selected_passive_type,
+                )
+            ] = CompactSelectSelector(
+                {
+                    "options": passive_types,
+                    "mode": SelectSelectorMode.LIST,
+                    "translation_key": "passive_mode_type",
+                }
+            )
+        passive_section_schema[
+            vol.Optional(
+                CONF_TEMPERATURE_INCREMENT,
+                default=passive_options.get(
+                    CONF_TEMPERATURE_INCREMENT,
+                    DEFAULT_PASSIVE_TEMP_INCREMENT,
+                ),
+            )
+        ] = selector(
+            {
+                "number": {
+                    "min": 0.5,
+                    "max": 20,
+                    "step": 0.5,
+                    "unit_of_measurement": UnitOfTemperature.CELSIUS,
+                    "mode": "box",
+                }
+            }
+        )
+        if len(passive_types) > 1:
+            passive_section_schema[
+                vol.Optional(
+                    CONF_CONTROL_STRATEGY,
+                    default=passive_options.get(
+                        CONF_CONTROL_STRATEGY,
+                        DEFAULT_PASSIVE_CONTROL_STRATEGY,
+                    ),
+                )
+            ] = ConditionalSelectSelector(
+                {
+                    "options": CONTROL_STRATEGIES,
+                    "mode": SelectSelectorMode.DROPDOWN,
+                    "translation_key": "room_control_strategy",
+                },
+                {
+                    "field": CONF_AUTOMATIONS_PASSIVE_TYPE,
+                    "operator": "eq",
+                    "value": PASSIVE_TYPE_EXTERNAL,
+                },
+            )
+
         data_schema = {
             vol.Required(CONF_AUTOMATIONS_PASSIVE): section(
-                vol.Schema(
-                    {
-                        vol.Optional(
-                            CONF_AUTOMATIONS_PASSIVE,
-                            default=options.get(CONF_AUTOMATIONS_PASSIVE, {}).get(
-                                CONF_AUTOMATIONS_PASSIVE, False
-                            ),
-                        ): bool,
-                        vol.Optional(
-                            CONF_AUTOMATIONS_PASSIVE_TEMP_INCREMENT,
-                            default=options.get(CONF_AUTOMATIONS_PASSIVE, {}).get(
-                                CONF_AUTOMATIONS_PASSIVE_TEMP_INCREMENT,
-                                DEFAULT_PASSIVE_TEMP_INCREMENT,
-                            ),
-                        ): selector(
-                            {
-                                "number": {
-                                    "min": 0.5,
-                                    "max": 20,
-                                    "step": 0.5,
-                                    "unit_of_measurement": UnitOfTemperature.CELSIUS,
-                                    "mode": "box",
-                                }
-                            }
-                        ),
-                    }
-                ),
+                vol.Schema(passive_section_schema),
+                {"collapsed": True},
+            ),
+            vol.Required(CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL): section(
+                vol.Schema(external_section_schema),
                 {"collapsed": True},
             ),
             vol.Required(CONF_AUTOMATIONS_HW_CLIMATE): section(
@@ -891,7 +1184,9 @@ class WiserOptionsFlowHandler(config_entries.OptionsFlow):
             ),
         }
         return self.async_show_form(
-            step_id="automation_params", data_schema=vol.Schema(data_schema)
+            step_id="automation_params",
+            errors=errors,
+            data_schema=vol.Schema(data_schema),
         )
 
 class CannotConnect(exceptions.HomeAssistantError):
