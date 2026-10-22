@@ -26,6 +26,7 @@ from .const import (
 )
 from .entity import WiserEntityMixin
 from .helpers import (
+    active_wiser_rooms,
     get_device_name,
     get_hub_device_info,
     get_hub_via_device_info,
@@ -137,7 +138,7 @@ def _remove_disabled_passive_mode_entities(hass: HomeAssistant, data) -> None:
         return
 
     entity_registry = er.async_get(hass)
-    for room in data.wiserhub.rooms.all:
+    for room in active_wiser_rooms(data):
         entity_id = entity_registry.async_get_entity_id(
             "switch",
             DOMAIN,
@@ -162,7 +163,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry, async_add_entitie
     for switch in WISER_SWITCHES:
         if switch["type"] == "room":
             for room in [
-                room for room in data.wiserhub.rooms.all if len(room.devices) > 0
+                room for room in active_wiser_rooms(data) if len(room.devices) > 0
             ]:
                 if getattr(room, switch["key"]) is not None:
                     wiser_switches.append(
@@ -280,7 +281,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry, async_add_entitie
     # Both control types use Wiser's native per-room Passive Mode. External
     # control changes only how assigned climate devices follow that room.
     if data.passive_mode_enabled:
-        for room in data.wiserhub.rooms.all:
+        for room in active_wiser_rooms(data):
             if _room_supports_passive_mode(room) or (
                 data.external_room_control.is_enabled(room.id)
             ):

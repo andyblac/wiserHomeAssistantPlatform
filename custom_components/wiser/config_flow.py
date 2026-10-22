@@ -101,7 +101,11 @@ from .opentherm_detection import (
     opentherm_hot_water_limits,
     opentherm_is_detected,
 )
-from .helpers import room_has_climate, room_supports_temperature_control
+from .helpers import (
+    active_wiser_rooms,
+    room_has_climate,
+    room_supports_temperature_control,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -437,7 +441,7 @@ class WiserOptionsFlowHandler(config_entries.OptionsFlow):
             return []
         return [
             room
-            for room in entry_data[DATA].wiserhub.rooms.all
+            for room in active_wiser_rooms(entry_data[DATA])
             if not room_has_climate(room)
         ]
 
@@ -464,7 +468,7 @@ class WiserOptionsFlowHandler(config_entries.OptionsFlow):
         entry_data = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
         if not entry_data:
             return []
-        return entry_data[DATA].wiserhub.rooms.all
+        return active_wiser_rooms(entry_data[DATA])
 
     def _external_room_control_room_fields(self):
         """Return unique form field labels mapped to Wiser room IDs."""
