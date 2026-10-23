@@ -77,10 +77,17 @@
         "sections": {
           "automations_passive_mode": {
             "name": "Passiivinen tila",
-            "description": "Ota passiivinen TRV-toiminto käyttöön. Jokainen huone on otettava erikseen käyttöön.",
+            "description": "Ota passiivitila käyttöön. Määritä moduloiva ohjaus tai lämpötilan rajoitin jokaiselle soveltuvalle huonelaitteelle.",
             "data": {
               "automations_passive_mode": "Passiivinen tila",
-              "passive_mode_temperature_increments": "Passiivisen tilan lämpötilaportaat"
+              "temperature_increment": "Lämpötilan lisäys"
+            }
+          },
+          "automations_external_room_control": {
+            "name": "Ulkoinen huoneohjaus",
+            "description": "Määritä ulkoiset ilmastointilaitteet Wiser-huoneisiin, jotta ne seuraavat huoneen nykyistä tavoitelämpötilaa passiivitilan kanssa tai ilman sitä.",
+            "data": {
+              "automations_external_room_control": "Ulkoinen huoneohjaus"
             }
           },
           "hotwater_climate": {
@@ -222,6 +229,10 @@
     "abort": {
       "opentherm_not_available": "OpenTherm-tietoja ei ole saatavilla tälle Wiser-keskittimelle.",
       "equipment_not_available": "Laitetietoja ei ole saatavilla tälle Wiser-keskittimelle."
+    },
+    "error": {
+      "external_climate_must_not_be_wiser": "Valitse ulkoinen ilmastointientiteetti. Wiser-ilmastointientiteettiä ei voi ohjata ulkoisena laitteena.",
+      "external_climate_duplicate_assignment": "Ulkoinen ilmastointientiteetti voidaan määrittää vain yhteen Wiser-huoneeseen."
     }
   },
   "services": {
@@ -319,6 +330,13 @@
       },
       "led_indicator": {
         "name": "LED-merkkivalo"
+      },
+      "passive_mode_strategy": {
+        "name": "Passiivitilan strategia",
+        "state": {
+          "modulating": "Moduloiva",
+          "temperature_limiter": "Lämpötilan rajoitin"
+        }
       }
     },
     "button": {
