@@ -60,6 +60,7 @@ def _load_wiser_init() -> ModuleType:
             "CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL",
             "CONF_AUTOMATIONS_PASSIVE_TYPE",
             "CONF_CONTROL_STRATEGY",
+            "CONF_EXTERNAL_ROOM_CONTROL_ASSIGNMENTS",
             "CONF_LEGACY_PASSIVE_TEMP_INCREMENT",
             "CONF_TEMPERATURE_INCREMENT",
             "CONF_DEPRECATED_HW_TARGET_TEMP",
@@ -69,6 +70,7 @@ def _load_wiser_init() -> ModuleType:
             "CONF_OPENTHERM_HOT_WATER_CONTROL",
             "CONF_OPENTHERM_HOT_WATER_MANUAL_TEMP",
             "CONF_OPENTHERM_HOT_WATER_PRESETS",
+            "CONF_PASSIVE_ROOM_STRATEGIES",
             "CONF_WISER_ROOM_NAMES",
             "DATA",
             "OPENTHERM_HOT_WATER_SCHEDULE",
@@ -83,6 +85,7 @@ def _load_wiser_init() -> ModuleType:
         DEFAULT_PASSIVE_CONTROL_STRATEGY="modulating",
         DEFAULT_PASSIVE_TYPE="internal",
         PASSIVE_TYPE_EXTERNAL="external",
+        CONTROL_STRATEGY_TEMPERATURE_LIMITER="temperature_limiter",
         WISER_PLATFORMS=[],
         WISER_SERVICES={},
         HWCycleModes=SimpleNamespace(CONTINUOUS="continuous", ONCE="once"),
@@ -113,6 +116,7 @@ def _load_wiser_init() -> ModuleType:
     _module(
         "wiser_init_test.entity_migration",
         migrate_entity_unique_ids=Mock(),
+        repair_card_update_unique_ids=Mock(return_value=0),
     )
     _module("wiser_init_test.frontend", JSModuleRegistration=object)
     _module(
