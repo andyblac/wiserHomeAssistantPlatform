@@ -48,7 +48,7 @@ class BuildTest(unittest.TestCase):
             json.dumps(
                 {
                     "domain": "wiser",
-                    "requirements": ["aioWiserHeatAPI==1.7.6"],
+                    "requirements": ["aioWiserHeatAPI==1.7.7"],
                     "version": "4.0.0-rc2",
                 }
             ),
@@ -85,19 +85,19 @@ class BuildTest(unittest.TestCase):
 
     def test_latest_api_prerelease_uses_newest_non_yanked_version(self):
         response = StringIO(json.dumps({"releases": {
-            "1.7.5": [{"yanked": False}],
-            "1.7.6b1": [{"yanked": False}],
-            "1.7.7b1": [{"yanked": True}],
+            "1.7.7": [{"yanked": False}],
+            "1.7.8b1": [{"yanked": False}],
+            "1.7.9b1": [{"yanked": True}],
             "not-a-version": [{"yanked": False}],
         }}))
         with patch.object(BUILD, "urlopen", return_value=response):
-            selected = BUILD.latest_api_prerelease(BUILD.Version("1.7.5"))
+            selected = BUILD.latest_api_prerelease(BUILD.Version("1.7.7"))
 
-        self.assertEqual(selected, BUILD.Version("1.7.6b1"))
+        self.assertEqual(selected, BUILD.Version("1.7.8b1"))
 
     def test_latest_api_prerelease_falls_back_when_pypi_is_unavailable(self):
         with patch.object(BUILD, "urlopen", side_effect=OSError("offline")):
-            selected = BUILD.latest_api_prerelease(BUILD.Version("1.7.5"))
+            selected = BUILD.latest_api_prerelease(BUILD.Version("1.7.7"))
 
         self.assertIsNone(selected)
 
@@ -115,7 +115,7 @@ class BuildTest(unittest.TestCase):
         )
         self.assertEqual(
             json.loads((self.source / "manifest.json").read_text())["requirements"],
-            ["aioWiserHeatAPI==1.7.6"],
+            ["aioWiserHeatAPI==1.7.7"],
         )
         with ZipFile(self.output) as archive:
             self.assertFalse(
@@ -139,7 +139,7 @@ class BuildTest(unittest.TestCase):
 
     def test_prerelease_build_prefers_published_api_prerelease(self):
         with patch.object(FETCH, "list_releases", return_value=[]), patch.object(
-            BUILD, "latest_api_prerelease", return_value=BUILD.Version("1.7.7b1")
+            BUILD, "latest_api_prerelease", return_value=BUILD.Version("1.7.8b1")
         ):
             BUILD.build(
                 self.source,
@@ -152,7 +152,7 @@ class BuildTest(unittest.TestCase):
 
         self.assertEqual(
             self.packaged_manifest()["requirements"],
-            ["aioWiserHeatAPI==1.7.7b1"],
+            ["aioWiserHeatAPI==1.7.8b1"],
         )
         with ZipFile(self.output) as archive:
             self.assertFalse(
@@ -174,7 +174,7 @@ class BuildTest(unittest.TestCase):
 
         self.assertEqual(
             self.packaged_manifest()["requirements"],
-            ["aioWiserHeatAPI==1.7.6"],
+            ["aioWiserHeatAPI==1.7.7"],
         )
 
     def test_stable_release_build_keeps_released_api_pin(self):
@@ -192,7 +192,7 @@ class BuildTest(unittest.TestCase):
 
         self.assertEqual(
             self.packaged_manifest()["requirements"],
-            ["aioWiserHeatAPI==1.7.6"],
+            ["aioWiserHeatAPI==1.7.7"],
         )
         prerelease.assert_not_called()
 
