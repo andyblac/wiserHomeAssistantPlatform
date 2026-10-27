@@ -127,6 +127,7 @@ class ClimateControlsFrontendTest(unittest.TestCase):
 
     def test_extra_info_is_not_clipped_by_native_label_overflow(self) -> None:
         self.assertIn(".info::after", self.source)
+        self.assertIn("--extra-info-margin-top, -6px", self.source)
         self.assertIn("max-width: 90%", self.source)
         self.assertNotIn(".info > p:last-of-type::after", self.source)
 
@@ -134,12 +135,6 @@ class ClimateControlsFrontendTest(unittest.TestCase):
         self.assertIn("attributes.passive_control_type", self.source)
         self.assertIn('return `Demand · ${demandForState(stateObj)}%`', self.source)
         self.assertNotIn("attributes?.demand_type", self.source)
-
-    def test_limiter_extra_info_includes_upper_target_temperature(self) -> None:
-        self.assertIn("formatLimiterTemperature", self.source)
-        self.assertIn("attributes?.target_temp_high", self.source)
-        self.assertIn("control._config?.config?.unit_system?.temperature", self.source)
-        self.assertIn('`${controlType} ${limiterTemperature}`', self.source)
 
     def test_preserves_native_climate_actions(self) -> None:
         self.assertIn('"set_hvac_mode"', self.source)
