@@ -1,4 +1,4 @@
-/*! WISER-CARD-VERSION wiser-climate-more-info 1.6.4 */
+/*! WISER-CARD-VERSION wiser-climate-more-info 1.6.5 */
 
 // The structure and behaviour in this control deliberately follow Home
 // Assistant's native MoreInfoClimate and HaStateControlClimateTemperature:
@@ -715,7 +715,6 @@ const applyThermostatInlineFeatures = (card) => {
         margin-inline: auto;
       }
       [${THERMOSTAT_FEATURE_ROW_ATTRIBUTE}] > [${THERMOSTAT_FEATURE_SLOT_ATTRIBUTE}] {
-        position: relative;
         min-width: 60px;
       }
       [${THERMOSTAT_FEATURE_SLOT_ATTRIBUTE}] > hui-card-features {
@@ -775,10 +774,11 @@ const augmentBoostPresetOptions = (feature, options) => {
   const stateObj = boostPresetFeatureState(feature);
   const minutes = boostMinutesRemaining(stateObj);
   const width = feature.__wiserBoostPresetWidth || feature.clientWidth || 0;
+  const widthMode = boostPresetWidthMode(width);
   if (
     !wiserControlsEnabled(stateObj) ||
     minutes === undefined ||
-    boostPresetWidthMode(width) === "icon"
+    widthMode === "icon"
   ) {
     return options;
   }
@@ -786,10 +786,7 @@ const augmentBoostPresetOptions = (feature, options) => {
   const remaining = minutes > 0 ? `${minutes}m` : "<1m";
   const presetValue = String(stateObj.attributes.preset_mode || "Boost");
   const presetName = presetValue.replace(/\s+<?\d+m$/i, "").trim() || "Boost";
-  const label =
-    boostPresetWidthMode(width) === "full"
-      ? `${presetName} · ${remaining}`
-      : remaining;
+  const label = widthMode === "full" ? `${presetName} · ${remaining}` : remaining;
   return [
     { value: presetValue, label },
     ...options.filter((option) => option.value !== presetValue),
@@ -855,6 +852,7 @@ const patchNativePresetFeature = async () => {
     const originalDisconnected = prototype.disconnectedCallback;
     prototype.disconnectedCallback = function (...args) {
       clearTimeout(this.__wiserBoostPresetTimer);
+      this.__wiserBoostPresetTimer = undefined;
       this.__wiserBoostPresetResizeObserver?.disconnect();
       this.__wiserBoostPresetResizeObserver = undefined;
       return originalDisconnected?.apply(this, args);
