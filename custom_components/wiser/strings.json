@@ -51,10 +51,12 @@
         "title": "UI options",
         "data": {
           "legacy_naming": "Legacy naming",
-          "show_wiser_sidebar": "Show Wiser in sidebar"
+          "show_wiser_sidebar": "Show Wiser in sidebar",
+          "wiser_climate_more_info": "Use Wiser climate More Info"
         },
         "data_description": {
-          "legacy_naming": "Include room names in Wiser device names. If enabled, using Home Assistant to regenerate entity IDs with the default format in Settings → System → Entity ID format (Home Assistant 2026.8 and later) will duplicate area names when the area and Wiser room names match. Changing this option does not rename existing entity IDs."
+          "legacy_naming": "Include room names in Wiser device names. If enabled, using Home Assistant to regenerate entity IDs with the default format in Settings → System → Entity ID format (Home Assistant 2026.8 and later) will duplicate area names when the area and Wiser room names match. Changing this option does not rename existing entity IDs.",
+          "wiser_climate_more_info": "Replace the native climate control inside More Info for Wiser rooms with a native-based Wiser control that shows demand and passive-mode styling. The surrounding Home Assistant dialog, history and settings are unchanged."
         }
       },
       "main_params": {
@@ -258,11 +260,11 @@
   "selector": {
     "opentherm_parameter": {
       "options": {
-        "chFlowActiveLowerSetpoint": "Active central-heating lower setpoint",
-        "chFlowActiveUpperSetpoint": "Active central-heating upper setpoint",
-        "dhwFlowSetpoint": "Hub hot-water flow setpoint",
-        "dhwSetpoint": "Boiler hot-water setpoint",
-        "maxChSetpoint": "Boiler maximum central-heating setpoint"
+        "ch_flow_active_lower_setpoint": "Active central-heating lower setpoint",
+        "ch_flow_active_upper_setpoint": "Active central-heating upper setpoint",
+        "dhw_flow_setpoint": "Hub hot-water flow setpoint",
+        "dhw_setpoint": "Boiler hot-water setpoint",
+        "max_ch_setpoint": "Boiler maximum central-heating setpoint"
       }
     }
   },
@@ -281,7 +283,19 @@
   "entity": {
     "climate": {
       "heating": {
-        "name": "Heating"
+        "name": "Heating",
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "advance_schedule": "Advance Schedule",
+              "cancel_overrides": "Cancel Overrides",
+              "boost_30m": "Boost 30m",
+              "boost_1h": "Boost 1h",
+              "boost_2h": "Boost 2h",
+              "boost_3h": "Boost 3h"
+            }
+          }
+        }
       },
       "floor_temperature": {
         "name": "Floor temperature"

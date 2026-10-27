@@ -51,10 +51,12 @@
         "title": "Brugerfladeindstillinger",
         "data": {
           "legacy_naming": "Ældre navngivning",
-          "show_wiser_sidebar": "Vis Wiser i sidepanelet"
+          "show_wiser_sidebar": "Vis Wiser i sidepanelet",
+          "wiser_climate_more_info": "Use Wiser climate More Info"
         },
         "data_description": {
-          "legacy_naming": "Medtag rumnavne i Wiser-enhedsnavne. Hvis dette er aktiveret, vil regenerering af entitets-id'er i Home Assistant med standardformatet under Indstillinger → System → Entitets-id-format (Home Assistant 2026.8 og nyere) duplikere områdenavne, når området og Wiser-rummet har samme navn. Ændring af denne indstilling omdøber ikke eksisterende entitets-id'er."
+          "legacy_naming": "Medtag rumnavne i Wiser-enhedsnavne. Hvis dette er aktiveret, vil regenerering af entitets-id'er i Home Assistant med standardformatet under Indstillinger → System → Entitets-id-format (Home Assistant 2026.8 og nyere) duplikere områdenavne, når området og Wiser-rummet har samme navn. Ændring af denne indstilling omdøber ikke eksisterende entitets-id'er.",
+          "wiser_climate_more_info": "Replace the native climate control inside More Info for Wiser rooms with a native-based Wiser control that shows demand and passive-mode styling. The surrounding Home Assistant dialog, history and settings are unchanged."
         }
       },
       "main_params": {
@@ -258,11 +260,11 @@
   "selector": {
     "opentherm_parameter": {
       "options": {
-        "chFlowActiveLowerSetpoint": "Aktivt nedre centralvarmeindstillingspunkt",
-        "chFlowActiveUpperSetpoint": "Aktivt øvre centralvarmeindstillingspunkt",
-        "dhwFlowSetpoint": "Hubbens varmtvandsfremløbsindstillingspunkt",
-        "dhwSetpoint": "Kedlens varmtvandsindstillingspunkt",
-        "maxChSetpoint": "Kedlens maksimale centralvarmeindstillingspunkt"
+        "ch_flow_active_lower_setpoint": "Aktivt nedre centralvarmeindstillingspunkt",
+        "ch_flow_active_upper_setpoint": "Aktivt øvre centralvarmeindstillingspunkt",
+        "dhw_flow_setpoint": "Hubbens varmtvandsfremløbsindstillingspunkt",
+        "dhw_setpoint": "Kedlens varmtvandsindstillingspunkt",
+        "max_ch_setpoint": "Kedlens maksimale centralvarmeindstillingspunkt"
       }
     }
   },
@@ -301,7 +303,19 @@
   "entity": {
     "climate": {
       "heating": {
-        "name": "Opvarmning"
+        "name": "Opvarmning",
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "advance_schedule": "Fremryk tidsplan",
+              "cancel_overrides": "Annuller tilsidesættelser",
+              "boost_30m": "Boost 30 min.",
+              "boost_1h": "Boost 1 t.",
+              "boost_2h": "Boost 2 t.",
+              "boost_3h": "Boost 3 t."
+            }
+          }
+        }
       },
       "floor_temperature": {
         "name": "Gulvtemperatur"

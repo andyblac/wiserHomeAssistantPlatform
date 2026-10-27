@@ -51,10 +51,12 @@
         "title": "Felhasználói felület beállításai",
         "data": {
           "legacy_naming": "Korábbi elnevezési mód",
-          "show_wiser_sidebar": "Wiser megjelenítése az oldalsávon"
+          "show_wiser_sidebar": "Wiser megjelenítése az oldalsávon",
+          "wiser_climate_more_info": "Use Wiser climate More Info"
         },
         "data_description": {
-          "legacy_naming": "A helyiségek neveinek hozzáadása a Wiser-eszközök nevéhez. Ha engedélyezve van, az entitásazonosítók Home Assistant általi újragenerálása az alapértelmezett formátummal a Beállítások → Rendszer → Entitásazonosító-formátum menüben (Home Assistant 2026.8-tól) megkettőzi a területneveket, ha a terület és a Wiser-helyiség neve megegyezik. A beállítás módosítása nem nevezi át a meglévő entitásazonosítókat."
+          "legacy_naming": "A helyiségek neveinek hozzáadása a Wiser-eszközök nevéhez. Ha engedélyezve van, az entitásazonosítók Home Assistant általi újragenerálása az alapértelmezett formátummal a Beállítások → Rendszer → Entitásazonosító-formátum menüben (Home Assistant 2026.8-tól) megkettőzi a területneveket, ha a terület és a Wiser-helyiség neve megegyezik. A beállítás módosítása nem nevezi át a meglévő entitásazonosítókat.",
+          "wiser_climate_more_info": "Replace the native climate control inside More Info for Wiser rooms with a native-based Wiser control that shows demand and passive-mode styling. The surrounding Home Assistant dialog, history and settings are unchanged."
         }
       },
       "main_params": {
@@ -258,11 +260,11 @@
   "selector": {
     "opentherm_parameter": {
       "options": {
-        "chFlowActiveLowerSetpoint": "Központi fűtés aktív alsó célhőmérséklete",
-        "chFlowActiveUpperSetpoint": "Központi fűtés aktív felső célhőmérséklete",
-        "dhwFlowSetpoint": "Központ melegvíz-előremenő célhőmérséklete",
-        "dhwSetpoint": "Kazán melegvíz-célhőmérséklete",
-        "maxChSetpoint": "Kazán központifűtés-maximális célhőmérséklete"
+        "ch_flow_active_lower_setpoint": "Központi fűtés aktív alsó célhőmérséklete",
+        "ch_flow_active_upper_setpoint": "Központi fűtés aktív felső célhőmérséklete",
+        "dhw_flow_setpoint": "Központ melegvíz-előremenő célhőmérséklete",
+        "dhw_setpoint": "Kazán melegvíz-célhőmérséklete",
+        "max_ch_setpoint": "Kazán központifűtés-maximális célhőmérséklete"
       }
     }
   },
@@ -301,7 +303,19 @@
   "entity": {
     "climate": {
       "heating": {
-        "name": "Fűtés"
+        "name": "Fűtés",
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "advance_schedule": "Ütemezés előreléptetése",
+              "cancel_overrides": "Felülbírálások törlése",
+              "boost_30m": "Felfűtés 30 perc",
+              "boost_1h": "Felfűtés 1 óra",
+              "boost_2h": "Felfűtés 2 óra",
+              "boost_3h": "Felfűtés 3 óra"
+            }
+          }
+        }
       },
       "floor_temperature": {
         "name": "Padlóhőmérséklet"
