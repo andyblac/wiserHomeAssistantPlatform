@@ -1,4 +1,4 @@
-/*! WISER-CARD-VERSION wiser-climate-more-info 1.1.1 */
+/*! WISER-CARD-VERSION wiser-climate-more-info 1.2.1 */
 
 // The structure and behaviour in this control deliberately follow Home
 // Assistant's native MoreInfoClimate and HaStateControlClimateTemperature:
@@ -39,13 +39,12 @@ const demandForState = (stateObj) => {
 };
 
 const extraInfoForState = (stateObj) => {
-  const state = stateObj?.state;
-  const mode = stateObj?.attributes?.is_passive
-    ? "Passive"
-    : state === "heat"
-      ? "Manual"
-      : titleCase(state);
-  return state === "off" ? mode : `${mode} · ${demandForState(stateObj)}%`;
+  const attributes = stateObj?.attributes;
+  if (attributes?.is_passive) {
+    const controlType = attributes.passive_control_type || "Modulation";
+    return `${controlType} · ${demandForState(stateObj)}%`;
+  }
+  return `Demand · ${demandForState(stateObj)}%`;
 };
 
 const wiserControlsEnabled = (stateObj) =>
