@@ -13,6 +13,7 @@ For releases before v3.3.5, see the [Full Change Log](https://github.com/asantag
 - Added optional native-based **Wiser climate controls** under **UI options**, applying the same room-demand, passive-mode colours and theme variables to both Thermostat cards and More Info while retaining Home Assistant's native card, dialog, temperature handling, history and settings.
 - Added **Bottom** and responsive **Inline** feature positioning to native Thermostat cards for Wiser rooms. Inline calculates space from each feature's configured button count and control style, while compact controls share the remaining row and wrap only when needed; the matching choice is available in Home Assistant's visual card editor.
 - Added the active Wiser boost and its remaining time to the native Preset selector, progressively reducing to the remaining time and then the standard preset icon as available space narrows.
+- Added external temperature sensor feedback to External Room Control for rooms without a Wiser Room Thermostat. A selected sensor can control the room against its scheduled target using fixed or proportional integration-owned boosts, with configurable tolerance, duration, maximum boost and stale-sensor timeout. Existing or user-modified boosts are left untouched - issue [#619](https://github.com/asantaga/wiserHomeAssistantPlatform/issues/619).
 
 ### Changed
 
