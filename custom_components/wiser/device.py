@@ -1,5 +1,7 @@
 """Device registry helpers for the Wiser integration."""
 
+import re
+
 
 def assign_device_area_if_unset(
     device_registry, area_registry, device, suggested_area
@@ -220,7 +222,13 @@ def migrate_entity_unique_id_duplicates(
     preferred_entries=None,
 ):
     """Migrate one entity, preferring a supplied historical registry record."""
-    entries = list({entry.entity_id: entry for entry in entries}.values())
+    entries = list(
+        {
+            entry.entity_id: entry
+            for entry in entries
+            if entity_registry.async_get(entry.entity_id) is not None
+        }.values()
+    )
     if not entries:
         return None
 
@@ -250,16 +258,82 @@ def migrate_entity_unique_id_duplicates(
             entry.entity_id,
         ),
     )
-    if existing is not None and existing.entity_id != canonical.entity_id:
-        # A v4.0.0/4.0.1 setup may already have created a replacement at the
-        # stable ID. Prefer the pre-v4 registry record so its entity_id,
-        # customisations, and long-term history continue in place.
-        entity_registry.async_remove(existing.entity_id)
+    for duplicate in entries:
+        if duplicate.entity_id != canonical.entity_id:
+            # Keep one registry record for each semantic entity.  Several v4
+            # migrations could otherwise leave the original plus multiple
+            # unavailable ``_2``/``_3`` replacements on the same device.
+            entity_registry.async_remove(duplicate.entity_id)
     if canonical.unique_id != new_unique_id:
         entity_registry.async_update_entity(
             canonical.entity_id, new_unique_id=new_unique_id
         )
     return canonical
+
+
+def repair_entity_id_collision_duplicates(
+    entity_registry,
+    entries,
+    stable_unique_ids,
+) -> int:
+    """Collapse suffixed replacements onto their original entity IDs.
+
+    Home Assistant adds ``_2``, ``_3`` and so on when an entity is registered
+    while an older registry record still owns its requested entity ID.  Only
+    groups containing a known current unique ID are repaired, so unrelated
+    user-renamed entities are not inferred from their names alone.
+    """
+    entries = [
+        entry
+        for entry in entries
+        if entity_registry.async_get(entry.entity_id) is not None
+    ]
+    stable_unique_ids = set(stable_unique_ids)
+    repaired = 0
+    handled_groups = set()
+
+    for target in entries:
+        if target.unique_id not in stable_unique_ids:
+            continue
+        base_entity_id = re.sub(r"_\d+$", "", target.entity_id)
+        group_key = (target.domain, base_entity_id)
+        if group_key in handled_groups:
+            continue
+        handled_groups.add(group_key)
+        duplicates = [
+            entry
+            for entry in entries
+            if entry.domain == target.domain
+            and re.sub(r"_\d+$", "", entry.entity_id) == base_entity_id
+        ]
+        # A real collision always leaves the originally requested, unsuffixed
+        # entity ID behind.  Numeric suffixes can also be meaningful parts of
+        # user or channel names, so never infer a group without that anchor.
+        if not any(
+            entry.entity_id == base_entity_id for entry in duplicates
+        ):
+            continue
+        # Multiple current unique IDs with similar entity IDs can be valid
+        # multi-channel entities.  Repair only the v4 pattern where one member
+        # is current and every other member is stale.
+        current_entries = [
+            entry
+            for entry in duplicates
+            if entry.unique_id in stable_unique_ids
+        ]
+        if len(duplicates) < 2 or len(current_entries) != 1:
+            continue
+
+        canonical = migrate_entity_unique_id_duplicates(
+            entity_registry,
+            duplicates,
+            current_entries[0].unique_id,
+            preferred_entries=duplicates,
+        )
+        if canonical is not None:
+            repaired += len(duplicates) - 1
+
+    return repaired
 
 
 def migrate_room_entities(

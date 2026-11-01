@@ -16,6 +16,7 @@ For releases before v3.3.5, see the [Full Change Log](https://github.com/asantag
 
 ### Fixed
 
+- Fixed repeated v4 upgrades leaving several unavailable `_2`/`_3` replacement entities beside the working physical-device entity. The registry repair now restores the current unique ID to the original unsuffixed entity, preserving its entity ID, history and automations, and removes the stale replacements - issue [#792](https://github.com/asantaga/wiserHomeAssistantPlatform/issues/792).
 - Fixed room climate and target-temperature entities displaying Wiser's internal `-20 °C` off sentinel when Away Mode is configured to turn heating off - issue [#783](https://github.com/asantaga/wiserHomeAssistantPlatform/issues/783).
 - Fixed logical room devices being inconsistently identified as `Controller` and retaining the HeatHub firmware version after upgrading. Room entities now report consistent `Room` metadata, and existing device-registry records are repaired during setup - issue [#782](https://github.com/asantaga/wiserHomeAssistantPlatform/issues/782).
 - Fixed shared Wiser services and Lovelace resources remaining registered after the final hub was removed, and ensured multi-hub service handlers are rebound to a loaded hub after another hub unloads.

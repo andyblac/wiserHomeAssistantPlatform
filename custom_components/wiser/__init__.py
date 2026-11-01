@@ -63,6 +63,7 @@ from .device import (
     register_hub_device,
     register_room_assigned_device,
     remove_room_devices,
+    repair_entity_id_collision_duplicates,
     room_names_with_pending_deletions,
 )
 from .entity_migration import (
@@ -698,6 +699,29 @@ def migrate_physical_device_registry(
                 {device.id},
             )
         )
+        stable_entity_ids.update(historical_entity_migration.values())
+        for name, key in (
+            ("Device Lock", "device_lock_enabled"),
+            ("Identify", "identify"),
+        ):
+            if hasattr(device, key):
+                stable_entity_ids.add(
+                    get_unique_id(
+                        data,
+                        device.product_type,
+                        name,
+                        device.id,
+                    )
+                )
+        if hasattr(device, "available_modes"):
+            stable_entity_ids.add(
+                get_unique_id(
+                    data,
+                    device.product_type,
+                    "mode-select",
+                    device.id,
+                )
+            )
         for old_unique_id, new_unique_id in historical_entity_migration.items():
             matching_entries = [
                 entry
@@ -711,6 +735,11 @@ def migrate_physical_device_registry(
                 entity_registry,
                 matching_entries,
                 new_unique_id,
+                preferred_entries=[
+                    entry
+                    for entry in matching_entries
+                    if entry.unique_id != new_unique_id
+                ],
             )
         room = data.wiserhub.rooms.get_by_device_id(device.id)
         temperature_type = None
@@ -793,6 +822,7 @@ def migrate_physical_device_registry(
                 room_attached_sensor_ids.add(stable_sensor_id)
 
         for stable_sensor_id, old_sensor_ids in sensor_id_migrations.items():
+            stable_entity_ids.add(stable_sensor_id)
             matching_sensor_entries = [
                 entry
                 for entry in registry_entities
@@ -819,6 +849,31 @@ def migrate_physical_device_registry(
                 entity_registry,
                 matching_sensor_entries,
                 stable_sensor_id,
+                preferred_entries=[
+                    entry
+                    for entry in matching_sensor_entries
+                    if entry.unique_id != stable_sensor_id
+                ],
+            )
+
+        candidate_device_ids = {
+            candidate.id for candidate in possible_devices
+        }
+        repaired_duplicates = repair_entity_id_collision_duplicates(
+            entity_registry,
+            [
+                entry
+                for entry in entity_registry.entities.values()
+                if entry.platform == DOMAIN
+                and entry.device_id in candidate_device_ids
+            ],
+            stable_entity_ids,
+        )
+        if repaired_duplicates:
+            _LOGGER.info(
+                "Repaired %s duplicate entities for Wiser device %s",
+                repaired_duplicates,
+                device.id,
             )
 
         device_entry = migrate_physical_device(

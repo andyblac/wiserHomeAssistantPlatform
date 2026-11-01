@@ -839,7 +839,7 @@ class MigratePhysicalDeviceTest(unittest.TestCase):
         )
         self.assertEqual(registry.removed, ["renamed-device"])
 
-    def test_keeps_oldest_temperature_entity_and_retains_duplicate(self) -> None:
+    def test_keeps_oldest_temperature_entity_and_removes_duplicate(self) -> None:
         old = EntityEntry(
             "sensor.room_temperature",
             "old-device",
@@ -867,9 +867,9 @@ class MigratePhysicalDeviceTest(unittest.TestCase):
             entities.updated,
             [("sensor.room_temperature", {"new_unique_id": "stable-id"})],
         )
-        self.assertEqual(entities.removed, [])
+        self.assertEqual(entities.removed, ["sensor.test_temperature"])
 
-    def test_keeps_existing_stable_target_and_retains_older_duplicate(self) -> None:
+    def test_keeps_existing_stable_target_and_removes_older_duplicate(self) -> None:
         old = EntityEntry(
             "sensor.room_temperature",
             "old-device",
@@ -894,7 +894,131 @@ class MigratePhysicalDeviceTest(unittest.TestCase):
 
         self.assertIs(result, target)
         self.assertEqual(entities.updated, [])
-        self.assertEqual(entities.removed, [])
+        self.assertEqual(entities.removed, ["sensor.room_temperature"])
+
+    def test_repairs_suffixed_replacements_using_original_entity_id(self) -> None:
+        original = EntityEntry(
+            "sensor.wiser_itrv_kitchen_battery",
+            "itrv-device",
+            unique_id="legacy-one",
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            device_class="battery",
+        )
+        second = EntityEntry(
+            "sensor.wiser_itrv_kitchen_battery_2",
+            "itrv-device",
+            unique_id="legacy-two",
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            device_class="battery",
+        )
+        third = EntityEntry(
+            "sensor.wiser_itrv_kitchen_battery_3",
+            "itrv-device",
+            unique_id="legacy-three",
+            created_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+            device_class="battery",
+        )
+        active = EntityEntry(
+            "sensor.wiser_itrv_kitchen_battery_4",
+            "itrv-device",
+            unique_id="stable-battery-id",
+            created_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+            device_class="battery",
+        )
+        registry = EntityRegistry(
+            {
+                entry.entity_id: entry
+                for entry in (original, second, third, active)
+            }
+        )
+
+        repaired = DEVICE.repair_entity_id_collision_duplicates(
+            registry,
+            list(registry.entities.values()),
+            {"stable-battery-id"},
+        )
+
+        self.assertEqual(repaired, 3)
+        self.assertEqual(
+            registry.updated,
+            [
+                (
+                    "sensor.wiser_itrv_kitchen_battery",
+                    {"new_unique_id": "stable-battery-id"},
+                )
+            ],
+        )
+        self.assertEqual(
+            registry.removed,
+            [
+                "sensor.wiser_itrv_kitchen_battery_2",
+                "sensor.wiser_itrv_kitchen_battery_3",
+                "sensor.wiser_itrv_kitchen_battery_4",
+            ],
+        )
+
+    def test_does_not_merge_suffixes_without_a_current_unique_id(self) -> None:
+        original = EntityEntry(
+            "sensor.custom_2", "device", unique_id="old-one"
+        )
+        other = EntityEntry(
+            "sensor.custom_3", "device", unique_id="old-two"
+        )
+        registry = EntityRegistry(
+            {original.entity_id: original, other.entity_id: other}
+        )
+
+        repaired = DEVICE.repair_entity_id_collision_duplicates(
+            registry,
+            list(registry.entities.values()),
+            {"different-stable-id"},
+        )
+
+        self.assertEqual(repaired, 0)
+        self.assertEqual(registry.updated, [])
+        self.assertEqual(registry.removed, [])
+
+    def test_does_not_merge_valid_numbered_entities_without_base(self) -> None:
+        second = EntityEntry(
+            "select.dimmer_mode_2", "device", unique_id="stable-channel-two"
+        )
+        third = EntityEntry(
+            "select.dimmer_mode_3", "device", unique_id="stable-channel-three"
+        )
+        registry = EntityRegistry(
+            {second.entity_id: second, third.entity_id: third}
+        )
+
+        repaired = DEVICE.repair_entity_id_collision_duplicates(
+            registry,
+            list(registry.entities.values()),
+            {"stable-channel-two", "stable-channel-three"},
+        )
+
+        self.assertEqual(repaired, 0)
+        self.assertEqual(registry.updated, [])
+        self.assertEqual(registry.removed, [])
+
+    def test_does_not_merge_two_current_channel_entities(self) -> None:
+        first = EntityEntry(
+            "select.dimmer_mode", "device", unique_id="stable-channel-one"
+        )
+        second = EntityEntry(
+            "select.dimmer_mode_2", "device", unique_id="stable-channel-two"
+        )
+        registry = EntityRegistry(
+            {first.entity_id: first, second.entity_id: second}
+        )
+
+        repaired = DEVICE.repair_entity_id_collision_duplicates(
+            registry,
+            list(registry.entities.values()),
+            {"stable-channel-one", "stable-channel-two"},
+        )
+
+        self.assertEqual(repaired, 0)
+        self.assertEqual(registry.updated, [])
+        self.assertEqual(registry.removed, [])
 
     def test_migrates_all_room_name_derived_entity_types(self) -> None:
         entities = {}
@@ -935,7 +1059,14 @@ class MigratePhysicalDeviceTest(unittest.TestCase):
         )
 
         self.assertEqual(len(registry.updated), len(definitions))
-        self.assertEqual(registry.removed, [])
+        self.assertEqual(
+            set(registry.removed),
+            {
+                f"{domain}.{expected_type}_new"
+                for domain, _translation_key, _device_class, expected_type
+                in definitions
+            },
+        )
         self.assertEqual(
             {update[1]["new_unique_id"] for update in registry.updated},
             {f"stable-{definition[3]}" for definition in definitions},
