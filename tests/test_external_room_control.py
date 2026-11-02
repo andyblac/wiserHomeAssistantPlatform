@@ -146,6 +146,7 @@ def load_controller():
         "ATTR_ENTITY_ID": "entity_id",
         "ATTR_MAX_TEMP": "max_temp",
         "ATTR_MIN_TEMP": "min_temp",
+        "ATTR_TARGET_TEMP_STEP": "target_temp_step",
         "ATTR_TEMPERATURE": "temperature",
         "CLIMATE_DOMAIN": "climate",
         "CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL": "automations_external_room_control",
@@ -299,6 +300,43 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
             {"entity_id": "climate.external_trv", "temperature": 19.0},
             blocking=True,
         )
+        self.assertEqual(
+            self.controller._controlled_climates["climate.external_trv"],
+            {"original_target": 25.0, "expected_target": 19.0},
+        )
+
+    async def test_removing_assignment_restores_owned_external_target(self):
+        await self.controller.async_update()
+        self.state.attributes["temperature"] = 19.0
+        self.hass.services.async_call.reset_mock()
+        self.controller.assignments = {}
+        self.controller.available = False
+
+        await self.controller.async_update()
+
+        self.hass.services.async_call.assert_awaited_once_with(
+            "climate",
+            "set_temperature",
+            {"entity_id": "climate.external_trv", "temperature": 25.0},
+            blocking=True,
+        )
+        self.assertNotIn(
+            "climate.external_trv", self.controller._controlled_climates
+        )
+
+    async def test_removing_assignment_preserves_user_modified_target(self):
+        await self.controller.async_update()
+        self.state.attributes["temperature"] = 21.0
+        self.hass.services.async_call.reset_mock()
+        self.controller.assignments = {}
+        self.controller.available = False
+
+        await self.controller.async_update()
+
+        self.hass.services.async_call.assert_not_awaited()
+        self.assertNotIn(
+            "climate.external_trv", self.controller._controlled_climates
+        )
 
     async def test_mirrors_wiser_target_in_fahrenheit_installation(self):
         self.hass.config.units.temperature_unit = "°F"
@@ -306,6 +344,7 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
             "temperature": 70.0,
             "min_temp": 41.0,
             "max_temp": 86.0,
+            "target_temp_step": 1.0,
         }
 
         await self.controller.async_update()
@@ -313,8 +352,25 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
         self.hass.services.async_call.assert_awaited_once_with(
             "climate",
             "set_temperature",
-            {"entity_id": "climate.external_trv", "temperature": 66.2},
+            {"entity_id": "climate.external_trv", "temperature": 66.0},
             blocking=True,
+        )
+
+    async def test_does_not_repeat_rounded_fahrenheit_target(self):
+        self.hass.config.units.temperature_unit = "°F"
+        self.room.current_target_temperature = 21.0
+        self.state.attributes = {
+            "temperature": 70.0,
+            "min_temp": 41.0,
+            "max_temp": 86.0,
+            "target_temp_step": 1.0,
+        }
+
+        await self.controller.async_update()
+
+        self.hass.services.async_call.assert_not_awaited()
+        self.assertNotIn(
+            "climate.external_trv", self.controller._controlled_climates
         )
 
     def _use_external_temperature_sensor(self, temperature=17.0):
@@ -1111,6 +1167,33 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(
             self.controller.schedule_supports_temperature_limiter(schedule)
+        )
+
+    def test_mixed_strategy_schedule_uses_hub_target_as_limiter_cutoff(self):
+        self.controller.coordinator.passive_room_strategies = {
+            "1": "temperature_limiter"
+        }
+        self.room.passive_mode_enabled = True
+        native_room = SimpleNamespace(
+            id=2,
+            passive_mode_enabled=True,
+            schedule=None,
+        )
+        schedule = SimpleNamespace(
+            id=7,
+            schedule_type="Heating",
+            assignment_ids=[1, 2],
+            current_setting=22.0,
+        )
+        self.room.schedule = schedule
+        native_room.schedule = schedule
+        self.controller.coordinator.wiserhub.rooms.all.append(native_room)
+
+        self.assertFalse(self.controller.schedule_uses_external_range(schedule))
+        self.assertTrue(self.controller.schedule_uses_native_range(schedule))
+        self.assertEqual(self.controller.upper_temperature(self.room.id), 22.0)
+        self.assertEqual(
+            self.controller.passive_upper_temperature(self.room), 22.0
         )
 
     async def test_update_applies_scheduled_passive_mode(self):
