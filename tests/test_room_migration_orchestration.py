@@ -111,6 +111,7 @@ def _load_wiser_init() -> ModuleType:
             "register_hub_device",
             "register_room_assigned_device",
             "remove_room_devices",
+            "repair_entity_id_collision_duplicates",
             "room_names_with_pending_deletions",
         )
     }
