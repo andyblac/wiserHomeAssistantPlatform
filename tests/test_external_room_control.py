@@ -338,6 +338,51 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
             "climate.external_trv", self.controller._controlled_climates
         )
 
+    async def test_shutdown_releases_all_owned_state(self):
+        await self.controller.async_update()
+        self.state.attributes["temperature"] = 19.0
+        self.hass.services.async_call.reset_mock()
+        self.room.name = "Office"
+        self.room.passive_mode_enabled = True
+        self.controller._rooms["1"][
+            "passive_schedule_original_enabled"
+        ] = False
+        self.room.is_boosted = True
+        self.room.is_override = True
+        expected_end = FakeDateTimeUtil.utcnow() + timedelta(minutes=30)
+        self.room.boost_end_time = expected_end
+        self.room.current_target_temperature = 22.0
+        self.controller._sensor_boosts["1"] = {
+            "expected_end": expected_end.isoformat(),
+            "expected_target": 22.0,
+        }
+
+        await self.controller.async_shutdown()
+
+        self.room.set_passive_mode.assert_awaited_once_with(False)
+        self.room.cancel_overrides.assert_awaited_once_with()
+        self.room.cancel_boost.assert_awaited_once_with()
+        self.hass.services.async_call.assert_awaited_once_with(
+            "climate",
+            "set_temperature",
+            {"entity_id": "climate.external_trv", "temperature": 25.0},
+            blocking=True,
+        )
+        self.assertIsNone(
+            self.controller._rooms["1"][
+                "passive_schedule_original_enabled"
+            ]
+        )
+        self.assertNotIn("1", self.controller._sensor_boosts)
+        self.assertFalse(self.controller._controlled_climates)
+
+    def test_unload_releases_external_room_control(self):
+        source = (COMPONENT / "__init__.py").read_text()
+
+        self.assertIn(
+            "await coordinator.external_room_control.async_shutdown()", source
+        )
+
     async def test_mirrors_wiser_target_in_fahrenheit_installation(self):
         self.hass.config.units.temperature_unit = "°F"
         self.state.attributes = {
@@ -1412,12 +1457,43 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
             self.controller._passive_control_schedules["7"], original_control
         )
 
+    async def test_combined_schedule_save_removes_obsolete_metadata(self):
+        self.controller._upper_schedules = {
+            "7": {"Monday": {"06:00": 22.0}}
+        }
+        self.controller._lower_schedules = {
+            "7": {"Monday": {"06:00": 15.0}}
+        }
+        self.controller._passive_control_schedules = {
+            "7": {"Monday": {"06:00": {"scheduled": False}}}
+        }
+        replacement_lower = {"Monday": {"06:00": 16.0}}
+
+        await self.controller.async_save_schedule_metadata(
+            7,
+            lower_schedule=replacement_lower,
+        )
+
+        self.assertNotIn("7", self.controller._upper_schedules)
+        self.assertEqual(
+            self.controller._lower_schedules["7"], replacement_lower
+        )
+        self.assertNotIn("7", self.controller._passive_control_schedules)
+
     def test_websocket_saves_schedule_metadata_in_one_operation(self):
         source = (COMPONENT / "websockets.py").read_text()
 
         self.assertIn("async_save_schedule_metadata", source)
         self.assertNotIn(
             "await d.external_room_control.async_save_upper_schedule", source
+        )
+
+    def test_websocket_rolls_back_failed_schedule_metadata_copy(self):
+        source = (COMPONENT / "websockets.py").read_text()
+
+        self.assertIn("previous_target_schedule = deepcopy", source)
+        self.assertIn(
+            "await target_schedule.set_schedule_from_ws_data", source
         )
 
     async def test_copy_schedule_metadata_replaces_stale_target_values(self):
