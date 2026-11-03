@@ -1081,6 +1081,9 @@ class WiserHotWater(
         attrs["is_heating"] = self.hotwater.is_heating
         attrs["current_control_source"] = self.hotwater.current_control_source
         attrs["control_output_state"] = "On" if self.hotwater.is_heating else "Off"
+        if self._data.wiser_climate_controls:
+            attrs["wiser_hot_water"] = True
+            attrs["custom_ui_more_info"] = "wiser-climate-more-info"
 
         # If boosted show boost end time
         if self.hotwater.is_boosted:

@@ -53,6 +53,7 @@ from .const import (
 from .entity import WiserEntityMixin
 from .helpers import get_hub_device_info, get_unique_id
 from .local_schedule import LOCAL_HOT_WATER_SCHEDULE_ID
+from .opentherm import opentherm_sensor_value
 from .opentherm_detection import (
     opentherm_hot_water_control_is_supported,
     opentherm_hot_water_limits,
@@ -309,6 +310,16 @@ class WiserOpenThermHotWater(
     def extra_state_attributes(self):
         """Expose the selected schedule and its next transition."""
         _, next_event = self._schedule.current()
+        try:
+            hot_water_active = opentherm_sensor_value(
+                self._opentherm, "hot_water_active"
+            )
+            flame_active = opentherm_sensor_value(
+                self._opentherm, "flame_active"
+            )
+        except (AttributeError, KeyError, TypeError):
+            hot_water_active = None
+            flame_active = None
         return {
             # Used by Wiser's card feature to scope its icon mode control to
             # this water heater rather than every water_heater entity in HA.
@@ -318,6 +329,10 @@ class WiserOpenThermHotWater(
             "schedule_id": LOCAL_HOT_WATER_SCHEDULE_ID,
             "schedule_name": self._schedule.name,
             "next_schedule_event": next_event,
+            "is_heating": hot_water_active is True,
+            "hot_water_active": hot_water_active,
+            "flame_active": flame_active,
+            "control_output_state": "On" if hot_water_active is True else "Off",
         }
 
     async def async_added_to_hass(self):

@@ -57,8 +57,17 @@ const demandForState = (stateObj) => {
   return Number.isFinite(demand) ? demand : 0;
 };
 
+const nativeWaterHeaterStateColor = (state) =>
+  state === "off"
+    ? "var(--state-water_heater-off-color, var(--state-water_heater-inactive-color, var(--state-inactive-color)))"
+    : `var(--state-water_heater-${state}-color, var(--state-water_heater-active-color, var(--state-active-color)))`;
+
 const climateStatusForState = (stateObj) => {
   const attributes = stateObj?.attributes;
+  if (attributes?.wiser_hot_water) {
+    if (stateObj.state === "off") return "Off";
+    return attributes.is_heating ? "Heating water" : "Idle";
+  }
   if (attributes?.is_passive) {
     const controlType = attributes.passive_control_type || "Modulation";
     return `${controlType} · ${demandForState(stateObj)}%`;
@@ -116,23 +125,36 @@ const applyWiserClimateStyle = async (control, stateObj) => {
 
   const demand = demandForState(stateObj);
   const passive = Boolean(stateObj.attributes.is_passive);
+  const hotWater = Boolean(stateObj.attributes.wiser_hot_water);
+  const heatingWater = hotWater && Boolean(stateObj.attributes.is_heating);
   const state = stateObj.state;
   const passiveMode = passive && (state === "auto" || state === "heat");
-  const sliderColor = passiveMode
-    ? state === "auto"
-      ? "var(--passive-auto-color, var(--light-green-color))"
-      : "var(--passive-heat-color, var(--amber-color))"
-    : "var(--slider-color, var(--disabled-color))";
-  const modeColor = passiveMode
+  const sliderColor = hotWater
+    ? heatingWater
+      ? "var(--state-climate-heat-color, var(--deep-orange-color))"
+      : nativeWaterHeaterStateColor(state)
+    : passiveMode
+      ? state === "auto"
+        ? "var(--passive-auto-color, var(--light-green-color))"
+        : "var(--passive-heat-color, var(--amber-color))"
+      : "var(--slider-color, var(--disabled-color))";
+  const modeColor = hotWater
     ? sliderColor
-    : state === "auto"
-      ? "var(--climate-auto-color, var(--green-color))"
-      : "var(--climate-heat-color, var(--deep-orange-color))";
-  const sliderOpacity = passiveMode
-    ? "var(--slider-passive-range-opacity, 1)"
-    : "var(--slider-opacity, var(--slider-theme-opacity, .3))";
-  const labelColor = demand > 0
-    ? "var(--label-text-highlight-color, var(--deep-orange-color, inherit))"
+    : passiveMode
+      ? sliderColor
+      : state === "auto"
+        ? "var(--climate-auto-color, var(--green-color))"
+        : "var(--climate-heat-color, var(--deep-orange-color))";
+  const sliderOpacity = hotWater && state !== "off"
+    ? "var(--slider-hot-water-opacity, 1)"
+    : passiveMode
+      ? "var(--slider-passive-range-opacity, 1)"
+      : "var(--slider-opacity, var(--slider-theme-opacity, .3))";
+  const highlighted = hotWater ? heatingWater : demand > 0;
+  const labelColor = highlighted
+    ? hotWater
+      ? "var(--state-climate-heat-color, var(--deep-orange-color))"
+      : "var(--label-text-highlight-color, var(--deep-orange-color, inherit))"
     : "var(--thermostat-primary-text-color, var(--primary-text-color))";
 
   control.style.setProperty("--wiser-slider-color", sliderColor);
@@ -169,12 +191,16 @@ const applyWiserClimateStyle = async (control, stateObj) => {
     .container.xs .info::after { display: none; }
     .container .label { color: var(--wiser-label-color) !important; }
     ${
-      demand > 0
-        ? ".container { --action-color: var(--radial-glow-color, var(--deep-orange-color)) !important; }"
+      highlighted
+        ? hotWater
+          ? ".container { --action-color: var(--state-climate-heat-color, var(--deep-orange-color)) !important; }"
+          : ".container { --action-color: var(--radial-glow-color, var(--deep-orange-color)) !important; }"
         : ""
     }
     ha-control-circular-slider {
-      --control-circular-slider-high-color: var(--custom-theme-control-circular-slider-high-color, var(--disabled-color)) !important;
+      --control-circular-slider-high-color: ${hotWater
+        ? "var(--wiser-slider-color)"
+        : "var(--custom-theme-control-circular-slider-high-color, var(--disabled-color))"} !important;
       --control-circular-slider-low-color: var(--wiser-slider-color) !important;
       --control-circular-slider-background: var(--wiser-slider-color) !important;
       --control-circular-slider-background-opacity: var(--wiser-slider-opacity) !important;
@@ -197,7 +223,10 @@ const applyWiserClimateStyle = async (control, stateObj) => {
       stroke-width: var(--custom-theme-slider-high-stroke-width, 25px);
     }
     path.arc.arc-colored.high {
-      opacity: var(--custom-theme-control-circular-slider-high-color-opacity, var(--slider-theme-opacity, .3)) !important;
+      opacity: ${hotWater
+        ? "1"
+        : "var(--custom-theme-control-circular-slider-high-color-opacity, var(--slider-theme-opacity, .3))"} !important;
+      ${hotWater ? "stroke: var(--wiser-slider-color) !important;" : ""}
       stroke-width: 25px;
     }
     .current {
@@ -207,7 +236,7 @@ const applyWiserClimateStyle = async (control, stateObj) => {
       opacity: .5 !important;
       stroke: var(--primary-text-color) !important;
     }
-    .arc.arc-active.high { opacity: 0 !important; }
+    .arc.arc-active.high { opacity: ${hotWater ? "1" : "0"} !important; }
     .target-border.high, .target-border.low {
       opacity: 1 !important;
       stroke: var(--wiser-slider-color) !important;

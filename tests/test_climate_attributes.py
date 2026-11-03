@@ -118,6 +118,30 @@ class ClimateControlsFrontendTest(unittest.TestCase):
         self.assertIn('return `Demand · ${demandForState(stateObj)}%`', self.source)
         self.assertNotIn("attributes?.demand_type", self.source)
 
+    def test_hot_water_uses_native_water_heater_state_colours(self) -> None:
+        for value in (
+            "wiser_hot_water",
+            "Heating water",
+            "--state-water_heater-active-color",
+            "--state-active-color",
+            "--state-inactive-color",
+            "--state-climate-heat-color",
+        ):
+            self.assertIn(value, self.source)
+        self.assertNotIn("--hot-water-heating-color", self.source)
+        self.assertNotIn("--hot-water-idle-color", self.source)
+
+    def test_hot_water_climate_opts_into_shared_more_info(self) -> None:
+        climate_source = (COMPONENT_PATH / "climate.py").read_text()
+        wiser_hot_water = climate_source.partition("class WiserHotWater(")[2]
+
+        self.assertIn('attrs["wiser_hot_water"] = True', wiser_hot_water)
+        self.assertIn(
+            'attrs["custom_ui_more_info"] = "wiser-climate-more-info"',
+            wiser_hot_water,
+        )
+        self.assertIn("if self._data.wiser_climate_controls:", wiser_hot_water)
+
     def test_thermostat_card_supports_tile_style_inline_features(self) -> None:
         self.assertIn('"hui-thermostat-card"', self.source)
         self.assertIn("renderInlineThermostatFeatures", self.source)
