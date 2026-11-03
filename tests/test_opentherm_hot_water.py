@@ -97,6 +97,8 @@ class OpenThermHotWaterScheduleTest(unittest.TestCase):
         self.assertIn("--state-water_heater-${activity}-color", frontend_source)
         self.assertIn("--state-${activity}-color", frontend_source)
         self.assertIn("--state-climate-heat-color", frontend_source)
+        self.assertIn('setProperty(\n      "--action-color"', frontend_source)
+        self.assertIn('removeProperty("--action-color")', frontend_source)
         self.assertNotIn("--hot-water-heating-color", frontend_source)
         self.assertNotIn("--hot-water-idle-color", frontend_source)
         self.assertIn("max-width: 320px", frontend_source)

@@ -54,6 +54,7 @@ const applyOpenThermHotWaterStyle = async (control, stateObj) => {
     control.style.removeProperty(control._wiserHotWaterStateColorProperty);
     control._wiserHotWaterStateColorProperty = undefined;
   }
+  control.style.removeProperty("--action-color");
   if (activity.active) {
     const stateKey = String(stateObj.state)
       .toLowerCase()
@@ -62,6 +63,10 @@ const applyOpenThermHotWaterStyle = async (control, stateObj) => {
     const property = `--state-water_heater-${stateKey}-color`;
     control.style.setProperty(
       property,
+      "var(--state-climate-heat-color, var(--deep-orange-color))"
+    );
+    control.style.setProperty(
+      "--action-color",
       "var(--state-climate-heat-color, var(--deep-orange-color))"
     );
     control._wiserHotWaterStateColorProperty = property;
@@ -83,8 +88,13 @@ const applyOpenThermHotWaterStyle = async (control, stateObj) => {
     control.shadowRoot.append(style);
   }
   style.textContent = `
-    .label, .info, .info > p {
+    .info, .info > p {
       color: var(--thermostat-primary-text-color, var(--primary-text-color)) !important;
+    }
+    .container .label {
+      color: ${activity.active
+        ? "var(--state-climate-heat-color, var(--deep-orange-color))"
+        : "var(--thermostat-primary-text-color, var(--primary-text-color))"} !important;
     }
     .info::after {
       color: ${activity.active
