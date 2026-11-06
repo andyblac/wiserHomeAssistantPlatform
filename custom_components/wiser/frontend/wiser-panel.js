@@ -1,4 +1,4 @@
-/*! WISER-CARD-VERSION wiser-panel 1.1.0 */
+/*! WISER-CARD-VERSION wiser-panel 1.1.1 */
 
 const WISER_ACTIVE_PANEL_KEY = "wiser-active-panel";
 
@@ -62,6 +62,7 @@ class WiserPanel extends HTMLElement {
           .brand { display:none; }
           #panel-tabs { margin-inline-start:0; }
           .panel-tab { padding:0 14px; }
+          #export-config, #import-config { display:none; }
         }
       </style>
       <header>
