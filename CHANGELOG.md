@@ -20,6 +20,7 @@ For releases before v3.3.5, see the [Full Change Log](https://github.com/asantag
 - Added a **Notifications** tab for native Wiser power, device, and automation notifications. With compatible hub and API support, administrators can manage notification settings and view, enable, disable, or delete Wiser automations.
 - Added optional **Wiser climate controls** under **UI options**. Home Assistant's native Thermostat cards and More Info show Wiser room demand, Passive Mode colours, and boost countdowns.
 - Added **Bottom** and responsive **Inline** control layouts to the native Thermostat card editor for Wiser rooms.
+- Optional Equipment sensors now include standalone equipment reported by the hub, such as EV chargers, and expose additional control, schedule, and rated power data where available.
 
 ### Changed
 
