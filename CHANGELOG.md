@@ -8,6 +8,10 @@ For releases before v3.3.5, see the [Full Change Log](https://github.com/asantag
 
 ### Upgrade notes
 
+### Added
+
+- Administrators can export Wiser panel settings to one JSON file and selectively restore individual panels, tab order, and titles. Import and export are available from the desktop panel menu.
+
 ### Changed
 
 ### Fixed
