@@ -8,7 +8,16 @@ For releases before v3.3.5, see the [Full Change Log](https://github.com/asantag
 
 ### Upgrade notes
 
+### Added
+
+- Added optional **Wiser climate controls** under **UI options**. Home Assistant's native Thermostat cards and More Info show Wiser room demand, Passive Mode colours, and boost countdowns.
+- Added **Bottom** and responsive **Inline** control layouts to the native Thermostat card editor for Wiser rooms.
+
 ### Changed
+
+- Passive Mode demand now shows **Modulation** or **Limiter**. OpenTherm and relay-controlled rooms continue to show a demand percentage.
+- The Thermostat card editor preview uses dashboard card sizing so the controls wrap as they do on the dashboard.
+- Updated hot water More Info controls and added a heating glow when hot water is active.
 
 ### Fixed
 
