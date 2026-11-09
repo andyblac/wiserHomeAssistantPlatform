@@ -105,16 +105,29 @@ class HotWaterCurrentActionTest(unittest.TestCase):
                 self.assertIsNone(self.properties["current_action"].fget(entity))
 
     def test_action_is_exposed_as_a_raw_state_for_frontend_localization(self):
-        entity = SimpleNamespace(
-            _schedule=SimpleNamespace(
-                current=lambda: (None, None, None), name="Hot water"
-            ),
-            _presets=[],
-            _boost_return_operation=None,
-            current_action="heating",
-        )
-        attributes = self.properties["extra_state_attributes"].fget(entity)
-        self.assertEqual(attributes["current_action"], "heating")
+        for status, action, hot_water_active, flame_active in (
+            (4, "heating", True, False),
+            (8, "idle", False, True),
+            (None, None, None, None),
+        ):
+            with self.subTest(status=status):
+                entity = SimpleNamespace(
+                    _schedule=SimpleNamespace(
+                        current=lambda: (45, None, 49), name="Hot water"
+                    ),
+                    _presets=[],
+                    _boost_return_operation=None,
+                    _opentherm=SimpleNamespace(
+                        operational_data=SimpleNamespace(slave_status=status)
+                    ),
+                )
+                entity.current_action = self.properties["current_action"].fget(entity)
+                attributes = self.properties["extra_state_attributes"].fget(entity)
+                self.assertEqual(attributes["current_action"], action)
+                self.assertIs(attributes["is_heating"], hot_water_active is True)
+                self.assertIs(attributes["hot_water_active"], hot_water_active)
+                self.assertIs(attributes["flame_active"], flame_active)
+                self.assertEqual(attributes["next_schedule_temp"], 49)
 
 
 def _system(generation=2, firmware="4.48.2", device_firmware="1.0.0"):

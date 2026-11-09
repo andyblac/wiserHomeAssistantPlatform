@@ -6,26 +6,27 @@ For releases before v3.3.5, see the [Full Change Log](https://github.com/asantag
 
 ## v4.1.0b0
 
+### Upgrade notes
+
+- Existing native Passive Mode settings, lower schedules, and active lower overrides migrate to the new configuration. Experimental external control settings need to be configured again.
+
 ### Added
 
 - External Room Control lets compatible Home Assistant climate devices follow a Wiser room. Eligible rooms can use modulating or temperature-limiter control in Passive Mode.
 - Rooms with a Wiser TRV and no native Wiser temperature sensor can use an external temperature sensor for feedback. Wiser applies configurable timed boosts when the room is below its scheduled target and leaves user overrides alone. [#619](https://github.com/asantaga/wiserHomeAssistantPlatform/issues/619)
-
-### Changed
-
-- Existing native Passive Mode settings, lower schedules, and active lower overrides migrate to the new configuration. Experimental external control settings need to be configured again.
-- Local builds produce an unpacked integration directory alongside the ZIP.
-
-### Upgrade notes
-
-### Added
-
 - OpenTherm hot water now reports its current heating activity and the next scheduled temperature.
 - The Controls card can use configured timed OpenTherm presets for hot water boosts. Without a timed preset, it offers standard durations at the configured Manual temperature and restores the previous mode when the boost ends.
 - Administrators can export Wiser panel settings to one JSON file and selectively restore individual panels, tab order, and titles. Import and export are available from the desktop panel menu.
 - Added a **Notifications** tab for native Wiser power, device, and automation notifications. With compatible hub and API support, administrators can manage notification settings and view, enable, disable, or delete Wiser automations.
+- Added optional **Wiser climate controls** under **UI options**. Home Assistant's native Thermostat cards and More Info show Wiser room demand, Passive Mode colours, and boost countdowns.
+- Added **Bottom** and responsive **Inline** control layouts to the native Thermostat card editor for Wiser rooms.
 
 ### Changed
+
+- Local builds produce an unpacked integration directory alongside the ZIP.
+- Passive Mode demand now shows **Modulation** or **Limiter**. OpenTherm and relay-controlled rooms continue to show a demand percentage.
+- The Thermostat card editor preview uses dashboard card sizing so the controls wrap as they do on the dashboard.
+- Updated hot water More Info controls and added a heating glow when hot water is active.
 
 ### Fixed
 
