@@ -8,10 +8,17 @@ For releases before v3.3.5, see the [Full Change Log](https://github.com/asantag
 
 ### Upgrade notes
 
+### Added
+
+- OpenTherm hot water now reports its current heating activity and the next scheduled temperature.
+- The Controls card can use configured timed OpenTherm presets for hot water boosts. Without a timed preset, it offers standard durations at the configured Manual temperature and restores the previous mode when the boost ends.
+
 ### Changed
 
 ### Fixed
 
+- The OpenTherm preset editor blocks saving temperatures outside the boiler's reported minimum and maximum while keeping numeric input.
+- Stored hot water boost actions refresh the selected hub and reject a hub that is no longer loaded.
 
 ## v4.0.2
 
