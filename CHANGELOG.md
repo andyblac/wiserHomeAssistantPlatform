@@ -8,6 +8,10 @@ For releases before v3.3.5, see the [Full Change Log](https://github.com/asantag
 
 ### Upgrade notes
 
+### Added
+
+- Added a **Notifications** tab for native Wiser power, device, and automation notifications. With compatible hub and API support, administrators can manage notification settings and view, enable, disable, or delete Wiser automations.
+
 ### Changed
 
 ### Fixed
