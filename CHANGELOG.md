@@ -8,6 +8,10 @@ For releases before v3.3.5, see the [Full Change Log](https://github.com/asantag
 
 ### Upgrade notes
 
+### Added
+
+- Optional Equipment sensors now include standalone equipment reported by the hub, such as EV chargers, and expose additional control, schedule, and rated power data where available.
+
 ### Changed
 
 ### Fixed
