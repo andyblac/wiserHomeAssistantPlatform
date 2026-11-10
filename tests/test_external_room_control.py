@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from asyncio import CancelledError, Lock
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import logging
@@ -11,6 +12,8 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock
+
+from test_ui_options import load_functions
 
 COMPONENT = Path(__file__).parents[1] / "custom_components/wiser"
 
@@ -144,6 +147,7 @@ def load_controller():
     registry = FakeRegistry()
     namespace = {
         "ATTR_ENTITY_ID": "entity_id",
+        "ATTR_HVAC_MODES": "hvac_modes",
         "ATTR_MAX_TEMP": "max_temp",
         "ATTR_MIN_TEMP": "min_temp",
         "ATTR_TARGET_TEMP_STEP": "target_temp_step",
@@ -172,7 +176,12 @@ def load_controller():
         "DEFAULT_PASSIVE_CONTROL_STRATEGY": "modulating",
         "DOMAIN": "wiser",
         "FROST_PROTECTION_TEMPERATURE": 5.0,
+        "HVACMode": SimpleNamespace(
+            HEAT="heat", COOL="cool", HEAT_COOL="heat_cool", OFF="off", AUTO="auto"
+        ),
         "HomeAssistantError": Exception,
+        "CancelledError": CancelledError,
+        "Lock": Lock,
         "MAX_SCHEDULE_TEMPERATURE": 30.0,
         "OFF_TEMPERATURE": -20.0,
         "SERVICE_SET_TEMPERATURE": "set_temperature",
@@ -192,6 +201,21 @@ def load_controller():
         ),
         "STORAGE_VERSION": 1,
         "Store": FakeStore,
+        "active_wiser_rooms": load_functions(
+            "helpers.py", {"active_wiser_rooms"}, {}
+        ).active_wiser_rooms,
+        "confirmed_deleted_room_ids": load_functions(
+            "device.py", {"confirmed_deleted_room_ids"}, {}
+        ).confirmed_deleted_room_ids,
+        "external_climates_assigned_to_other_hubs": load_functions(
+            "helpers.py",
+            {"external_climates_assigned_to_other_hubs"},
+            {
+                "DOMAIN": "wiser",
+                "CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL": "automations_external_room_control",
+                "CONF_EXTERNAL_ROOM_CONTROL_ASSIGNMENTS": "external_room_control_assignments",
+            },
+        ).external_climates_assigned_to_other_hubs,
         "WEEKDAYS": (
             "Monday",
             "Tuesday",
@@ -240,9 +264,13 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
             set_passive_mode_upper_temp=AsyncMock(),
             set_passive_mode=AsyncMock(),
             set_target_temperature=AsyncMock(),
+            schedule_advance=AsyncMock(return_value=True),
             cancel_overrides=AsyncMock(),
             boost=AsyncMock(return_value=True),
             cancel_boost=AsyncMock(return_value=True),
+        )
+        self.room.set_passive_mode.side_effect = lambda enabled: setattr(
+            self.room, "passive_mode_enabled", enabled
         )
         wiserhub = SimpleNamespace(
             rooms=SimpleNamespace(all=[self.room]),
@@ -255,6 +283,7 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
         self.hass = SimpleNamespace(
             states=SimpleNamespace(get=lambda _entity_id: self.state),
             services=SimpleNamespace(async_call=AsyncMock()),
+            config_entries=SimpleNamespace(async_entries=lambda _domain: []),
             config=SimpleNamespace(
                 units=SimpleNamespace(temperature_unit="°C")
             ),
@@ -340,6 +369,68 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
         self.hass.services.async_call.assert_not_awaited()
         self.assertNotIn(
             "climate.external_trv", self.controller._controlled_climates
+        )
+
+    async def test_rejected_target_keeps_last_accepted_target_owned(self):
+        self.room.current_target_temperature = 30.0
+        await self.controller.async_update()
+        self.state.attributes["temperature"] = 30.0
+        self.room.current_target_temperature = 5.0
+        self.hass.services.async_call.side_effect = RuntimeError("target rejected")
+
+        await self.controller.async_update()
+
+        entity_id = "climate.external_trv"
+        saved = self.controller._store.async_save.await_args.args[0]
+        self.assertEqual(saved["controlled_climates"][entity_id]["expected_target"], 30.0)
+        self.hass.services.async_call.side_effect = None
+        self.hass.services.async_call.reset_mock()
+        await self.controller.async_shutdown()
+
+        self.hass.services.async_call.assert_awaited_once_with(
+            "climate",
+            "set_temperature",
+            {"entity_id": entity_id, "temperature": 25.0},
+            blocking=True,
+        )
+
+    async def test_shutdown_does_not_restore_heat_target_in_cooling_mode(self):
+        self.state.attributes.update(
+            temperature=16.0, hvac_modes=["heat", "cool", "off"]
+        )
+        await self.controller.async_update()
+        self.state.state = "cool"
+        self.state.attributes["temperature"] = 19.0
+        self.hass.services.async_call.reset_mock()
+
+        await self.controller.async_shutdown()
+
+        self.hass.services.async_call.assert_not_awaited()
+        self.assertNotIn("climate.external_trv", self.controller._controlled_climates)
+
+    async def test_limiter_holds_target_until_missing_room_is_confirmed_deleted(self):
+        self.controller.coordinator.passive_room_strategies = {"1": "temperature_limiter"}
+        self.room.is_passive_mode = self.room.passive_mode_enabled = True
+        await self.controller.async_update()
+        self.state.attributes["temperature"] = 30.0
+        self.hass.services.async_call.reset_mock()
+
+        self.room.current_temperature = None
+        await self.controller.async_update()
+        self.hass.services.async_call.assert_not_awaited()
+
+        rooms = self.controller.coordinator.wiserhub.rooms.all
+        rooms.clear()
+        for _ in range(2):
+            await self.controller.async_update()
+        self.hass.services.async_call.assert_not_awaited()
+
+        await self.controller.async_update()
+        self.hass.services.async_call.assert_awaited_once_with(
+            "climate",
+            "set_temperature",
+            {"entity_id": "climate.external_trv", "temperature": 25.0},
+            blocking=True,
         )
 
     async def test_removing_assignment_converts_stored_target_unit(self):
@@ -743,6 +834,18 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.upper_temperature(1), 20.0)
         self.assertFalse(self.controller.has_passive_override(1))
 
+    async def test_external_sensor_accepts_a_recent_unchanged_report(self):
+        self._use_external_temperature_sensor(17.0)
+        self.state.last_updated = FakeDateTimeUtil.utcnow() - timedelta(hours=1)
+
+        await self.controller.async_update()
+        self.room.boost.assert_not_awaited()
+
+        self.state.last_reported = FakeDateTimeUtil.utcnow()
+
+        await self.controller.async_update()
+        self.room.boost.assert_awaited_once_with(3.0, 60)
+
     async def test_auto_lower_slider_creates_schedule_override(self):
         self.controller.coordinator.passive_room_strategies = {
             "1": "temperature_limiter"
@@ -802,13 +905,48 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
             assignment_ids=[1],
         )
 
-        await self.controller.async_set_passive_lower_temperature(1, 17.0)
-        await self.controller.async_set_upper_temperature(1, 22.0)
+        await self.controller.async_set_passive_temperature_range(1, 17.0, 22.0)
 
         self.room.set_target_temperature.assert_awaited_once_with(17.0)
         self.assertEqual(
             self.controller._rooms["1"]["passive_upper_override"], 22.0
         )
+
+    async def test_manual_range_can_move_above_its_previous_upper_limit(self):
+        for strategy in ("modulating", "temperature_limiter"):
+            with self.subTest(strategy=strategy):
+                self.setUp()
+                self.room.mode = "Manual"
+                self.controller.coordinator.passive_room_strategies = {"1": strategy}
+
+                async def set_upper(temperature):
+                    self.room.passive_mode_upper_temp = temperature
+                    self.room.configured_passive_mode_upper_temp = temperature
+
+                self.room.set_passive_mode_upper_temp.side_effect = set_upper
+
+                await self.controller.async_set_passive_temperature_range(
+                    1, 22.0, 25.0
+                )
+
+                self.room.set_passive_mode_lower_temp.assert_awaited_once_with(22.0)
+                self.room.set_passive_mode_upper_temp.assert_awaited_once_with(25.0)
+
+    async def test_auto_limiter_range_can_move_below_its_previous_lower_limit(self):
+        self.controller.coordinator.passive_room_strategies = {
+            "1": "temperature_limiter"
+        }
+        self.room.is_passive_mode = True
+        self.room.passive_mode_enabled = True
+        self.room.passive_mode_lower_temp = 18.0
+        self.room.schedule = SimpleNamespace(
+            id=7, schedule_type="Heating", assignment_ids=[1]
+        )
+
+        await self.controller.async_set_passive_temperature_range(1, 14.0, 16.0)
+
+        self.room.set_target_temperature.assert_awaited_once_with(14.0)
+        self.assertEqual(self.controller.upper_temperature(1), 16.0)
 
     def test_lower_override_keeps_external_upper_limit(self):
         self.controller.coordinator.passive_room_strategies = {
@@ -892,6 +1030,24 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
             blocking=True,
         )
 
+    async def test_wiser_off_does_not_lower_a_cooling_target(self):
+        self.room.mode = "Off"
+        self.room.current_target_temperature = -20.0
+        self.state.attributes.update(temperature=23.0, min_temp=16.0)
+
+        for mode, modes in (
+            ("cool", ["off", "cool"]),
+            ("off", ["off", "cool"]),
+            ("cool", ["off", "heat", "cool"]),
+            ("auto", ["off", "heat", "cool", "auto"]),
+            ("heat_cool", ["off", "heat", "heat_cool"]),
+        ):
+            with self.subTest(mode=mode, modes=modes):
+                self.state.state = mode
+                self.state.attributes["hvac_modes"] = modes
+                await self.controller.async_update()
+                self.hass.services.async_call.assert_not_awaited()
+
     async def test_target_is_clamped_to_external_maximum(self):
         self.room.current_target_temperature = 32.0
 
@@ -901,6 +1057,21 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
             "climate",
             "set_temperature",
             {"entity_id": "climate.external_trv", "temperature": 30.0},
+            blocking=True,
+        )
+
+    async def test_target_rounds_down_when_external_maximum_is_between_steps(self):
+        self.state.attributes.update(
+            min_temp=7.0, max_temp=30.5, target_temp_step=2.0
+        )
+        self.room.current_target_temperature = 32.0
+
+        await self.controller.async_update()
+
+        self.hass.services.async_call.assert_awaited_once_with(
+            "climate",
+            "set_temperature",
+            {"entity_id": "climate.external_trv", "temperature": 29.0},
             blocking=True,
         )
 
@@ -935,6 +1106,40 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
         self.controller.available = False
 
         self.assertFalse(self.controller.is_enabled(1))
+
+    async def test_external_climate_control_waits_for_cross_hub_conflict_to_clear(self):
+        await self.controller.async_update()
+        self.state.attributes["temperature"] = 19.0
+        self.room.current_target_temperature = 24.0
+        self.hass.services.async_call.reset_mock()
+        other_entry = SimpleNamespace(
+            entry_id="other",
+            disabled_by=None,
+            options={
+                "automations_external_room_control": {
+                    "external_room_control_assignments": {
+                        "2": ["climate.external_trv"]
+                    }
+                }
+            },
+        )
+        self.hass.config_entries.async_entries = lambda _domain: [other_entry]
+
+        await self.controller.async_update()
+        self.assertFalse(self.controller.is_enabled(1))
+        self.hass.services.async_call.assert_not_awaited()
+
+        await self.controller.async_shutdown()
+        self.hass.services.async_call.assert_not_awaited()
+
+        other_entry.disabled_by = "user"
+        await self.controller.async_update()
+        self.hass.services.async_call.assert_awaited_once_with(
+            "climate",
+            "set_temperature",
+            {"entity_id": "climate.external_trv", "temperature": 24.0},
+            blocking=True,
+        )
 
     async def test_limiter_requires_room_strategy(self):
         self.controller.coordinator.passive_room_strategies = {
@@ -1118,6 +1323,37 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
                 1, datetime(2026, 10, 19, 20, 0)
             )["enabled"]
         )
+
+    async def test_advance_schedule_pairs_limits_from_the_hub_next_slot(self):
+        self.room.is_passive_mode = self.room.passive_mode_enabled = True
+        self.controller.coordinator.passive_room_strategies["1"] = "temperature_limiter"
+        next_time = datetime(2026, 10, 19, 18, 0)
+        self.room.schedule = SimpleNamespace(
+            id=7, schedule_type="Heating", assignment_ids=[1],
+            next=SimpleNamespace(datetime=next_time, setting=18.0),
+        )
+        self.controller._passive_control_schedules["7"] = {
+            "Monday": {
+                "06:00": {"enabled": True, "lower": 15.0, "upper": 22.0},
+                "18:00": {"enabled": True, "lower": 18.0, "upper": 25.0},
+            }
+        }
+        settings = self.controller._rooms["1"]
+        self.room.schedule_advance.return_value = False
+
+        await self.controller.async_advance_passive_schedule(self.room)
+
+        self.assertIsNone(settings["passive_lower_override"])
+        self.assertIsNone(settings["passive_upper_override"])
+        self.controller._store.async_save.assert_not_awaited()
+        self.room.schedule_advance.return_value = True
+
+        await self.controller.async_advance_passive_schedule(self.room)
+
+        self.assertEqual(settings["passive_lower_override"], 18.0)
+        self.assertEqual(settings["passive_upper_override"], 25.0)
+        self.assertEqual(settings["passive_override_schedule_transition"], next_time.isoformat())
+        self.controller._store.async_save.assert_awaited_once()
 
     def test_validated_passive_controls_select_the_hub_setpoint(self):
         schedule = {
@@ -1339,6 +1575,48 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
         )
         self.room.cancel_overrides.assert_awaited_once()
 
+    async def test_failed_passive_restore_keeps_original_mode_and_retries(self):
+        self.room.passive_mode_enabled = True
+        settings = self.controller._rooms["1"]
+        settings["passive_schedule_original_enabled"] = False
+        update_room_mode = self.room.set_passive_mode.side_effect
+        self.room.set_passive_mode.side_effect = None
+        self.room.set_passive_mode.return_value = None
+
+        await self.controller.async_shutdown()
+        await self.controller.async_update()
+
+        self.assertIs(settings["passive_schedule_original_enabled"], False)
+        self.room.cancel_overrides.assert_not_awaited()
+
+        self.room.set_passive_mode.side_effect = update_room_mode
+        await self.controller.async_update()
+
+        self.assertEqual(self.room.set_passive_mode.await_count, 3)
+        self.room.cancel_overrides.assert_awaited_once()
+        self.assertIsNone(settings["passive_schedule_original_enabled"])
+
+    async def test_scheduled_passive_exit_waits_for_manual_boost_to_end(self):
+        self.room.passive_mode_enabled = True
+        self.room.is_boosted = True
+        self.room.is_override = True
+        settings = self.controller._rooms["1"]
+        settings["passive_schedule_original_enabled"] = False
+
+        await self.controller.async_update()
+        await self.controller.async_shutdown()
+
+        self.room.set_passive_mode.assert_not_awaited()
+        self.room.cancel_overrides.assert_not_awaited()
+        self.assertIs(settings["passive_schedule_original_enabled"], False)
+
+        self.room.is_boosted = False
+        self.room.is_override = False
+        await self.controller.async_update()
+
+        self.room.set_passive_mode.assert_awaited_once_with(False)
+        self.assertIsNone(settings["passive_schedule_original_enabled"])
+
     async def test_native_passive_lower_uses_local_schedule(self):
         self.controller.coordinator.passive_room_strategies = {}
         self.room.passive_mode_enabled = True
@@ -1535,18 +1813,115 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
     def test_websocket_saves_schedule_metadata_in_one_operation(self):
         source = (COMPONENT / "websockets.py").read_text()
 
-        self.assertIn("async_save_schedule_metadata", source)
+        self.assertIn("await d.external_room_control.async_write_schedule", source)
         self.assertNotIn(
             "await d.external_room_control.async_save_upper_schedule", source
         )
 
-    def test_websocket_rolls_back_failed_schedule_metadata_copy(self):
-        source = (COMPONENT / "websockets.py").read_text()
-
-        self.assertIn("previous_target_schedule = deepcopy", source)
-        self.assertIn(
-            "await target_schedule.set_schedule_from_ws_data", source
+    async def test_schedule_services_clear_old_passive_metadata(self):
+        methods = load_functions(
+            "schedules.py",
+            {"set_schedule", "set_schedule_from_data"},
+            {
+                "_LOGGER": logging.getLogger(__name__),
+                "HomeAssistantError": RuntimeError,
+                "WiserScheduleError": RuntimeError,
+            },
         )
+        schedule = SimpleNamespace(
+            id=7,
+            name="Heating schedule",
+            schedule_type="Heating",
+            ws_schedule_data={},
+            set_schedule_from_yaml_file=AsyncMock(),
+            set_schedule_from_yaml_data=AsyncMock(),
+        )
+        entity = SimpleNamespace(
+            name="Office",
+            schedule=schedule,
+            data=SimpleNamespace(
+                external_room_control=self.controller, async_refresh=AsyncMock()
+            ),
+        )
+        for method, writer, payload in (
+            (methods.set_schedule, schedule.set_schedule_from_yaml_file, "heating.yaml"),
+            (methods.set_schedule_from_data, schedule.set_schedule_from_yaml_data, "Monday: []"),
+        ):
+            with self.subTest(method=method.__name__):
+                self.controller._upper_schedules["7"] = {"Monday": {"06:00": 22.0}}
+                self.controller._passive_control_schedules["7"] = {
+                    "Monday": {"06:00": {"enabled": True, "strategy": "modulating"}}
+                }
+
+                await method(entity, payload)
+
+                writer.assert_awaited_once_with(payload)
+                self.assertNotIn("7", self.controller._upper_schedules)
+                self.assertNotIn("7", self.controller._passive_control_schedules)
+
+    async def test_assign_schedule_service_rejects_ineligible_rooms(self):
+        methods = load_functions(
+            "schedules.py",
+            {"assign_schedule_by_id_or_name"},
+            {"_LOGGER": logging.getLogger(__name__), "HomeAssistantError": Exception},
+        )
+        schedule = SimpleNamespace(id=7, schedule_type="Heating", assign_schedule=AsyncMock())
+        self.controller.assignments = {}
+        self.controller._passive_control_schedules["7"] = {
+            "Monday": {"06:00": {"enabled": True, "strategy": "temperature_limiter"}}
+        }
+        self.room.name = "Office"
+        entity = SimpleNamespace(
+            room=self.room,
+            get_schedule_type=lambda: SimpleNamespace(value="Heating"),
+            data=SimpleNamespace(
+                external_room_control=self.controller,
+                wiserhub=SimpleNamespace(
+                    schedules=SimpleNamespace(get_by_id=lambda *_: schedule)
+                ),
+            ),
+        )
+
+        with self.assertRaisesRegex(Exception, "External Room Control"):
+            await methods.assign_schedule_by_id_or_name(entity, 7, None)
+
+        schedule.assign_schedule.assert_not_awaited()
+
+    async def test_copy_rolls_back_hub_schedule_when_saving_metadata_fails(self):
+        source = SimpleNamespace(id=7, schedule_type="Heating", copy_schedule=AsyncMock())
+        original_schedule = {"ScheduleData": [{"day": "Monday", "slots": []}]}
+        target = SimpleNamespace(
+            id=8,
+            schedule_type="Heating",
+            ws_schedule_data=original_schedule,
+            set_schedule_from_ws_data=AsyncMock(),
+        )
+        original_lower = {"Monday": {"06:00": 12.0}}
+        self.controller._lower_schedules["8"] = original_lower
+        self.controller._store.async_save.side_effect = OSError("disk full")
+
+        with self.assertRaisesRegex(OSError, "disk full"):
+            await self.controller.async_copy_schedule(source, target)
+
+        source.copy_schedule.assert_awaited_once_with(8)
+        target.set_schedule_from_ws_data.assert_awaited_once_with(original_schedule)
+        self.assertEqual(self.controller._lower_schedules["8"], original_lower)
+
+    async def test_copy_rejects_limiter_schedule_for_an_ineligible_room(self):
+        source = SimpleNamespace(id=7, schedule_type="Heating", copy_schedule=AsyncMock())
+        target = SimpleNamespace(id=8, assignment_ids=[1])
+        self.controller.assignments = {}
+        self.controller._passive_control_schedules["7"] = {
+            "Monday": {
+                "06:00": {"enabled": True, "strategy": "temperature_limiter"}
+            }
+        }
+
+        with self.assertRaisesRegex(Exception, "every room assigned to the destination"):
+            await self.controller.async_copy_schedule(source, target)
+
+        source.copy_schedule.assert_not_awaited()
+        self.assertNotIn("8", self.controller._passive_control_schedules)
 
     async def test_copy_schedule_metadata_replaces_stale_target_values(self):
         self.controller._upper_schedules = {
@@ -1568,8 +1943,12 @@ class ExternalRoomControlControllerTest(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        await self.controller.async_copy_schedule_metadata(7, 8)
+        source = SimpleNamespace(id=7, schedule_type="Heating", copy_schedule=AsyncMock())
+        target = SimpleNamespace(id=8, schedule_type="Heating", ws_schedule_data={})
 
+        await self.controller.async_copy_schedule(source, target)
+
+        source.copy_schedule.assert_awaited_once_with(8)
         self.assertNotIn("8", self.controller._upper_schedules)
         self.assertNotIn("8", self.controller._lower_schedules)
         self.assertEqual(

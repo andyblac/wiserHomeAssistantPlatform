@@ -495,7 +495,16 @@ class WiserRoom(WiserEntityMixin, CoordinatorEntity, ClimateEntity, WiserSchedul
         _LOGGER.debug("Setting Preset Mode %s for %s", preset_mode, self._room.name)
         try:
             api_preset_mode = WISER_PRESET_TO_API.get(preset_mode, preset_mode)
-            await self._room.set_preset(api_preset_mode)
+            if (
+                self._room.passive_mode_enabled
+                and api_preset_mode == WiserPresetOptionsEnum.advance_schedule.value
+                and api_preset_mode in self._room.available_presets
+            ):
+                await self._data.external_room_control.async_advance_passive_schedule(
+                    self._room
+                )
+            else:
+                await self._room.set_preset(api_preset_mode)
             if (
                 self._room.passive_mode_enabled
                 and api_preset_mode == WiserPresetOptionsEnum.cancel_overrides.value
@@ -504,16 +513,6 @@ class WiserRoom(WiserEntityMixin, CoordinatorEntity, ClimateEntity, WiserSchedul
                     self._room_id
                 )
                 await self._data.external_room_control.async_cancel_upper_override(
-                    self._room_id
-                )
-            if (
-                self._room.passive_mode_enabled
-                and api_preset_mode == WiserPresetOptionsEnum.advance_schedule.value
-            ):
-                await self._data.external_room_control.async_advance_passive_lower_schedule(
-                    self._room_id
-                )
-                await self._data.external_room_control.async_advance_upper_schedule(
                     self._room_id
                 )
         except ValueError as ex:
@@ -748,24 +747,11 @@ class WiserRoom(WiserEntityMixin, CoordinatorEntity, ClimateEntity, WiserSchedul
     async def async_set_temperature(self, **kwargs):
         """Set new target temperatures."""
         if self._room.is_passive_mode and not self._room.is_boosted:
-            target_temp_low = kwargs.get("target_temp_low")
-            if (
-                target_temp_low is not None
-                and float(target_temp_low)
-                != float(self.native_target_temperature_low)
-            ):
-                await self._data.external_room_control.async_set_passive_lower_temperature(
-                    self._room_id, target_temp_low
-                )
-            target_temp_high = kwargs.get("target_temp_high")
-            if (
-                target_temp_high is not None
-                and float(target_temp_high)
-                != float(self.native_target_temperature_high)
-            ):
-                await self._data.external_room_control.async_set_upper_temperature(
-                    self._room_id, target_temp_high
-                )
+            await self._data.external_room_control.async_set_passive_temperature_range(
+                self._room_id,
+                kwargs.get("target_temp_low"),
+                kwargs.get("target_temp_high"),
+            )
         else:
             target_temperature = kwargs.get(ATTR_TEMPERATURE)
             if target_temperature is None:

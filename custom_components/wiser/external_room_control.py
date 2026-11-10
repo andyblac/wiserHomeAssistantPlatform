@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from asyncio import CancelledError, Lock
 from copy import deepcopy
 from datetime import datetime, timedelta
 import logging
 import math
 
 from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
-from homeassistant.components.climate.const import ATTR_TARGET_TEMP_STEP
+from homeassistant.components.climate.const import (
+    ATTR_HVAC_MODES,
+    ATTR_TARGET_TEMP_STEP,
+    HVACMode,
+)
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     ATTR_TEMPERATURE,
@@ -47,7 +52,12 @@ from .const import (
     EXTERNAL_TEMPERATURE_BOOST_FIXED,
     EXTERNAL_TEMPERATURE_BOOST_PROPORTIONAL,
 )
-from .helpers import room_supports_external_temperature_feedback
+from .device import confirmed_deleted_room_ids
+from .helpers import (
+    active_wiser_rooms,
+    external_climates_assigned_to_other_hubs,
+    room_supports_external_temperature_feedback,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -77,6 +87,7 @@ class ExternalRoomControlController:
         """Initialise the controller from config-entry options."""
         self.hass = hass
         self.coordinator = coordinator
+        self._entry_id = config_entry.entry_id
         options = config_entry.options.get(CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL, {})
         configured_assignments = {
             str(room_id): list(entity_ids)
@@ -193,6 +204,8 @@ class ExternalRoomControlController:
         self._closed_limiter_rooms: set[str] = set()
         self._sensor_boosts: dict[str, dict] = {}
         self._controlled_climates: dict[str, dict] = {}
+        self._missing_room_counts: dict[str, int] = {}
+        self._schedule_write_lock = Lock()
 
     async def async_load(self) -> None:
         """Load Passive Mode lower schedules and migrate experimental data."""
@@ -386,8 +399,17 @@ class ExternalRoomControlController:
             settings["passive_override_schedule_transition"] = None
 
     def assigned_entity_ids(self, room_id) -> list[str]:
-        """Return climate entities assigned to a Wiser room."""
-        return self.assignments.get(str(room_id), [])
+        """Return climate entities this room can control exclusively."""
+        entity_ids = self.assignments.get(str(room_id))
+        if not entity_ids:
+            return []
+        assigned_to_other_hubs = external_climates_assigned_to_other_hubs(
+            self.hass, self._entry_id
+        )
+        return [
+            entity_id for entity_id in entity_ids
+            if entity_id not in assigned_to_other_hubs
+        ]
 
     def has_assignment(self, room_id) -> bool:
         """Return whether a room has at least one external climate entity."""
@@ -990,7 +1012,7 @@ class ExternalRoomControlController:
                 schedules[schedule_id] = replacement
         try:
             await self._async_save()
-        except Exception:
+        except (Exception, CancelledError):
             for schedules, value in zip(schedule_stores, previous):
                 if value is None:
                     schedules.pop(schedule_id, None)
@@ -998,33 +1020,76 @@ class ExternalRoomControlController:
                     schedules[schedule_id] = value
             raise
 
-    async def async_copy_schedule_metadata(
-        self, schedule_id, to_schedule_id
-    ) -> None:
-        """Copy all locally stored schedule metadata without stale values."""
-        source_id = str(schedule_id)
-        target_id = str(to_schedule_id)
-        schedule_stores = (
-            self._upper_schedules,
-            self._lower_schedules,
-            self._passive_control_schedules,
-        )
-        previous = [deepcopy(schedules.get(target_id)) for schedules in schedule_stores]
-        for schedules in schedule_stores:
-            source = schedules.get(source_id)
-            if source is None:
-                schedules.pop(target_id, None)
-            else:
-                schedules[target_id] = deepcopy(source)
+    async def async_assign_schedule(self, schedule, target_id) -> None:
+        """Check limiter eligibility before assigning a hub schedule."""
+        async with self._schedule_write_lock:
+            if (
+                str(schedule.schedule_type).casefold() == "heating"
+                and self.passive_control_schedule_uses_temperature_limiter(schedule.id)
+                and not self.is_enabled(target_id)
+            ):
+                raise HomeAssistantError(
+                    "Temperature limiter periods require External Room Control "
+                    "for every assigned room"
+                )
+            await schedule.assign_schedule(target_id)
+
+    async def async_write_schedule(self, schedule, write_native, payload, **metadata) -> None:
+        """Replace a hub schedule and update its associated Passive Mode metadata."""
+        async with self._schedule_write_lock:
+            await self._async_write_schedule(schedule, write_native, payload, **metadata)
+
+    async def _async_write_schedule(self, schedule, write_native, payload, **metadata) -> None:
+        schedule_id = str(schedule.id)
+        if str(schedule.schedule_type).casefold() != "heating" or not (
+            any(value is not None for value in metadata.values())
+            or schedule_id in self._upper_schedules
+            or schedule_id in self._lower_schedules
+            or schedule_id in self._passive_control_schedules
+        ):
+            await write_native(payload)
+            return
+
+        previous_schedule = deepcopy(schedule.ws_schedule_data)
+        await write_native(payload)
         try:
-            await self._async_save()
-        except Exception:
-            for schedules, value in zip(schedule_stores, previous):
-                if value is None:
-                    schedules.pop(target_id, None)
-                else:
-                    schedules[target_id] = value
+            await self.async_save_schedule_metadata(schedule_id, **metadata)
+        except (Exception, CancelledError):
+            try:
+                await schedule.set_schedule_from_ws_data(previous_schedule)
+            except Exception:
+                _LOGGER.exception(
+                    "Unable to restore Wiser schedule %s after its Passive Mode "
+                    "metadata could not be saved",
+                    schedule.id,
+                )
             raise
+
+    async def async_copy_schedule(self, source, target) -> None:
+        """Copy the hub schedule and its Passive Mode metadata together."""
+        async with self._schedule_write_lock:
+            if str(source.schedule_type).casefold() != "heating":
+                await source.copy_schedule(target.id)
+                return
+            if (
+                self.passive_control_schedule_uses_temperature_limiter(source.id)
+                and not self.schedule_supports_temperature_limiter(target)
+            ):
+                raise HomeAssistantError(
+                    "Temperature limiter periods require External Room Control "
+                    "for every room assigned to the destination schedule"
+                )
+            source_id = str(source.id)
+            await self._async_write_schedule(
+                target,
+                source.copy_schedule,
+                target.id,
+                upper_schedule=deepcopy(self._upper_schedules.get(source_id)),
+                lower_schedule=deepcopy(self._lower_schedules.get(source_id)),
+                passive_control_schedule=deepcopy(
+                    self._passive_control_schedules.get(source_id)
+                ),
+            )
 
     async def async_delete_schedule_metadata(self, schedule_id) -> None:
         """Remove all locally stored metadata after schedule deletion."""
@@ -1167,13 +1232,46 @@ class ExternalRoomControlController:
         self._clear_unused_schedule_override_marker(settings)
         await self._async_save()
 
-    async def async_set_passive_lower_temperature(
-        self, room_id, temperature: float
+    async def async_set_passive_temperature_range(
+        self, room_id, lower: float | None, upper: float | None
     ) -> None:
-        """Set a scheduled Passive lower override or the static lower value."""
+        """Apply changed limits in an order that keeps a valid temperature range."""
         room = self._room(room_id)
         if room is None:
             return
+        limiter = self.uses_temperature_limiter(room_id)
+        current_upper = float(
+            self.upper_temperature(room_id) if limiter else room.passive_mode_upper_temp
+        )
+        lower = float(lower) if lower is not None else None
+        upper = float(upper) if upper is not None else None
+        if lower == room.passive_mode_lower_temp:
+            lower = None
+        if upper == current_upper or not (limiter or room.mode == "Manual"):
+            upper = None
+
+        # Raise the upper limit first if the new lower limit crosses the old one.
+        if (
+            lower is not None
+            and upper is not None
+            and current_upper < lower <= upper
+        ):
+            await self.async_set_upper_temperature(room_id, upper)
+            upper = None
+        if lower is not None:
+            lower = await self.async_set_passive_lower_temperature(room_id, lower)
+        if upper is not None:
+            await self.async_set_upper_temperature(
+                room_id, upper, lower_temperature=lower
+            )
+
+    async def async_set_passive_lower_temperature(
+        self, room_id, temperature: float
+    ) -> float | None:
+        """Set a scheduled Passive lower override or the static lower value."""
+        room = self._room(room_id)
+        if room is None:
+            return None
         upper_temperature = (
             self.upper_temperature(room_id)
             if self.uses_temperature_limiter(room_id)
@@ -1188,15 +1286,19 @@ class ExternalRoomControlController:
                 or self.schedule_uses_native_range(room.schedule)
             )
         ):
-            await room.set_target_temperature(temperature)
+            if not await room.set_target_temperature(temperature):
+                return None
             settings = self._settings(room_id)
             settings["passive_lower_override"] = temperature
             self._set_schedule_override_marker(settings, room)
             await self._async_save()
-            return
+            return temperature
         await room.set_passive_mode_lower_temp(temperature)
+        return float(room.passive_mode_lower_temp)
 
-    async def async_set_upper_temperature(self, room_id, temperature: float) -> None:
+    async def async_set_upper_temperature(
+        self, room_id, temperature: float, *, lower_temperature: float | None = None
+    ) -> None:
         """Set the cutoff used only by an external temperature limiter."""
         room = self._room(room_id)
         if room is None:
@@ -1205,7 +1307,12 @@ class ExternalRoomControlController:
             if room.mode == "Manual":
                 await room.set_passive_mode_upper_temp(float(temperature))
             return
-        temperature = max(float(temperature), float(room.passive_mode_lower_temp))
+        if lower_temperature is None:
+            lower_temperature = float(room.passive_mode_lower_temp)
+        temperature = max(float(temperature), lower_temperature)
+        if room.mode == "Manual":
+            # The hub's manual upper limit also caps its effective lower limit.
+            await room.set_passive_mode_upper_temp(temperature)
         settings = self._settings(room_id)
         if room.mode == "Auto" and room.schedule is not None:
             settings["passive_upper_override"] = temperature
@@ -1225,50 +1332,82 @@ class ExternalRoomControlController:
         self._clear_unused_schedule_override_marker(settings)
         await self._async_save()
 
-    async def async_advance_upper_schedule(self, room_id) -> None:
-        """Pair Wiser Advance Schedule with the next external cutoff."""
-        room = self._room(room_id)
-        if room is None or not self.uses_temperature_limiter(room_id):
+    async def async_advance_passive_schedule(self, room) -> None:
+        """Advance the hub schedule and pair it with the next slot's limits."""
+        schedule = room.schedule
+        next_period = getattr(schedule, "next", None)
+        if next_period is None or not await room.schedule_advance():
             return
-        upper = self._scheduled_temperature(
-            room, self._upper_schedules, next_period=True
-        )
-        if upper is None:
+        if not self.coordinator.passive_mode_enabled:
             return
-        settings = self._settings(room_id)
-        settings["passive_upper_override"] = upper
+
+        transition = getattr(next_period, "datetime", None)
+        control = None
+        if isinstance(transition, datetime):
+            controls = self._passive_control_schedules.get(str(schedule.id), {})
+            control = controls.get(WEEKDAYS[transition.weekday()], {}).get(
+                transition.strftime("%H:%M")
+            )
+
+        limiter = self.uses_temperature_limiter(room.id)
+        if (
+            isinstance(control, dict)
+            and control.get("scheduled", True)
+            and control.get("enabled")
+        ):
+            lower = float(control["lower"])
+            upper = float(control["upper"]) if limiter else None
+        else:
+            lower = None
+            upper = (
+                self._scheduled_temperature(room, self._upper_schedules, next_period=True)
+                if limiter
+                else None
+            )
+            if self.schedule_uses_external_range(schedule):
+                try:
+                    lower = float(next_period.setting)
+                except (AttributeError, TypeError, ValueError):
+                    pass
+            elif self.schedule_uses_native_range(schedule):
+                lower = self._scheduled_temperature(
+                    room, self._lower_schedules, next_period=True
+                )
+
+        if lower is None and upper is None:
+            return
+        settings = self._settings(room.id)
+        if lower is not None:
+            settings["passive_lower_override"] = lower
+        if upper is not None:
+            settings["passive_upper_override"] = upper
         self._set_schedule_override_marker(settings, room)
         await self._async_save()
 
-    async def async_advance_passive_lower_schedule(self, room_id) -> None:
-        """Pair Wiser's Advance Schedule override with the next lower slot."""
-        room = self._room(room_id)
-        schedule = getattr(room, "schedule", None)
-        if room is None or schedule is None:
-            return
-        if self.schedule_uses_external_range(schedule):
-            next_period = getattr(schedule, "next", None)
-            try:
-                lower = float(next_period.setting)
-            except (AttributeError, TypeError, ValueError):
-                return
-        elif self.schedule_uses_native_range(schedule):
-            lower = self._scheduled_temperature(
-                room, self._lower_schedules, next_period=True
-            )
-        else:
-            return
-        if lower is None:
-            return
-        settings = self._settings(room_id)
-        settings["passive_lower_override"] = lower
-        self._set_schedule_override_marker(settings, room)
-        await self._async_save()
+    async def _async_set_scheduled_passive_mode(self, room, enabled: bool) -> bool:
+        """Apply a scheduled mode change and verify the room accepted it."""
+        if bool(room.passive_mode_enabled) == enabled:
+            return True
+        if room.is_boosted and not self._sensor_boost_is_owned(room):
+            # Changing Passive Mode can replace the active override on the hub.
+            return False
+        await room.set_passive_mode(enabled)
+        if bool(room.passive_mode_enabled) != enabled:
+            return False
+        if not enabled:
+            await room.cancel_overrides()
+        return True
 
     async def async_update(self) -> None:
         """Update external climate mirroring and temperature feedback."""
         await self._async_remove_orphaned_schedules()
-        await self._async_release_unassigned_climates()
+        active_rooms = active_wiser_rooms(self.coordinator)
+        deleted_room_ids = confirmed_deleted_room_ids(
+            self.assignments,
+            {str(room.id) for room in active_rooms},
+            self._missing_room_counts,
+        )
+        await self._async_release_unassigned_climates(deleted_room_ids=deleted_room_ids)
         storage_changed = False
         for room in self.coordinator.wiserhub.rooms.all:
             room_id = str(room.id)
@@ -1286,16 +1425,10 @@ class ExternalRoomControlController:
                         room.passive_mode_enabled
                     )
                     storage_changed = True
-                enabled = bool(control["enabled"])
-                if bool(room.passive_mode_enabled) != enabled:
-                    await room.set_passive_mode(enabled)
-                    if not enabled:
-                        await room.cancel_overrides()
+                await self._async_set_scheduled_passive_mode(room, bool(control["enabled"]))
             elif original is not None:
-                if bool(room.passive_mode_enabled) != bool(original):
-                    await room.set_passive_mode(bool(original))
-                    if not original:
-                        await room.cancel_overrides()
+                if not await self._async_set_scheduled_passive_mode(room, bool(original)):
+                    continue
                 settings["passive_schedule_original_enabled"] = None
                 storage_changed = True
         for room in self.coordinator.wiserhub.rooms.all:
@@ -1335,7 +1468,7 @@ class ExternalRoomControlController:
         if not self.available:
             return
 
-        for room in self.coordinator.wiserhub.rooms.all:
+        for room in active_rooms:
             if self.has_temperature_sensor(room.id):
                 self._closed_limiter_rooms.discard(str(room.id))
                 await self._async_update_temperature_sensor(room)
@@ -1379,10 +1512,12 @@ class ExternalRoomControlController:
         state = self.hass.states.get(entity_id) if entity_id else None
         if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
             return None
-        last_updated = getattr(state, "last_updated", None)
-        if last_updated is not None:
+        last_reported = getattr(state, "last_reported", None) or getattr(
+            state, "last_updated", None
+        )
+        if last_reported is not None:
             try:
-                age = dt_util.utcnow() - dt_util.as_utc(last_updated)
+                age = dt_util.utcnow() - dt_util.as_utc(last_reported)
             except (TypeError, ValueError):
                 return None
             if age > timedelta(minutes=self.temperature_stale_minutes):
@@ -1514,13 +1649,27 @@ class ExternalRoomControlController:
         }
         await self._async_save()
 
-    def _assigned_climate_entity_ids(self) -> set[str]:
+    def _assigned_climate_entity_ids(self, deleted_room_ids) -> set[str]:
         """Return every climate entity assigned to this controller."""
         return {
             entity_id
-            for entity_ids in self.assignments.values()
+            for room_id, entity_ids in self.assignments.items()
+            if room_id not in deleted_room_ids
             for entity_id in entity_ids
         }
+
+    @staticmethod
+    def _can_control_heating(state) -> bool:
+        """Return whether writing a target is safe in the current HVAC mode."""
+        if state.state == HVACMode.HEAT:
+            return True
+        hvac_modes = state.attributes.get(ATTR_HVAC_MODES) or ()
+        return (
+            state.state in (HVACMode.OFF, HVACMode.AUTO)
+            and HVACMode.HEAT in hvac_modes
+            and HVACMode.COOL not in hvac_modes
+            and HVACMode.HEAT_COOL not in hvac_modes
+        )
 
     @staticmethod
     def _target_temperature_step(state) -> float | None:
@@ -1533,13 +1682,20 @@ class ExternalRoomControlController:
 
     @staticmethod
     def _snap_target_temperature(
-        temperature: float, step: float | None, minimum: float | None
+        temperature: float,
+        step: float | None,
+        minimum: float | None,
+        maximum: float | None = None,
     ) -> float:
         """Round a target to a climate entity's supported temperature grid."""
         if step is None:
             return temperature
         base = minimum if minimum is not None else 0.0
-        return round(base + round((temperature - base) / step) * step, 6)
+        steps = round((temperature - base) / step)
+        if maximum is not None:
+            # A maximum between steps must round down to stay on the grid.
+            steps = min(steps, math.floor((maximum - base) / step + 1e-9))
+        return round(base + steps * step, 6)
 
     def _targets_match(self, state, current: float, expected: float) -> bool:
         """Return whether two targets resolve to the same supported value."""
@@ -1566,22 +1722,29 @@ class ExternalRoomControlController:
         return temperature
 
     async def _async_release_unassigned_climates(
-        self, *, release_all: bool = False
+        self, *, release_all: bool = False, deleted_room_ids: set[str] | None = None
     ) -> None:
         """Restore climates that this controller no longer owns."""
         assigned = (
-            set() if release_all else self._assigned_climate_entity_ids()
+            set() if release_all else self._assigned_climate_entity_ids(deleted_room_ids or set())
+        )
+        assigned_to_other_hubs = external_climates_assigned_to_other_hubs(
+            self.hass, self._entry_id
         )
         changed = False
         for entity_id, marker in list(self._controlled_climates.items()):
             if entity_id in assigned:
                 continue
-            if not isinstance(marker, dict):
+            if entity_id in assigned_to_other_hubs or not isinstance(marker, dict):
                 self._controlled_climates.pop(entity_id, None)
                 changed = True
                 continue
             state = self.hass.states.get(entity_id)
             if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                continue
+            if not self._can_control_heating(state):
+                self._controlled_climates.pop(entity_id)
+                changed = True
                 continue
             current_unit = self.hass.config.units.temperature_unit
             try:
@@ -1621,6 +1784,7 @@ class ExternalRoomControlController:
                         original_target,
                         self._target_temperature_step(state),
                         minimum_target,
+                        maximum_target,
                     )
                     try:
                         await self.hass.services.async_call(
@@ -1654,20 +1818,16 @@ class ExternalRoomControlController:
             original = settings.get("passive_schedule_original_enabled")
             if original is None:
                 continue
-            if bool(room.passive_mode_enabled) != bool(original):
-                try:
-                    restored = await room.set_passive_mode(bool(original))
-                    if restored is False:
-                        continue
-                    if not original:
-                        await room.cancel_overrides()
-                except Exception:  # pylint: disable=broad-except  # noqa: BLE001
-                    _LOGGER.warning(
-                        "Unable to restore scheduled Passive Mode for %s",
-                        room.name,
-                        exc_info=True,
-                    )
+            try:
+                if not await self._async_set_scheduled_passive_mode(room, bool(original)):
                     continue
+            except Exception:  # pylint: disable=broad-except  # noqa: BLE001
+                _LOGGER.warning(
+                    "Unable to restore scheduled Passive Mode for %s",
+                    room.name,
+                    exc_info=True,
+                )
+                continue
             settings["passive_schedule_original_enabled"] = None
             storage_changed = True
 
@@ -1735,6 +1895,8 @@ class ExternalRoomControlController:
             if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
                 _LOGGER.debug("External climate entity %s is unavailable", entity_id)
                 continue
+            if not self._can_control_heating(state):
+                continue
             if ATTR_TEMPERATURE not in state.attributes:
                 _LOGGER.warning(
                     "Ignoring external climate entity %s because it does not "
@@ -1794,6 +1956,7 @@ class ExternalRoomControlController:
                 target,
                 self._target_temperature_step(state),
                 minimum_target,
+                maximum_target,
             )
             if (
                 current_target is not None
@@ -1815,15 +1978,23 @@ class ExternalRoomControlController:
                 "expected_target": target,
                 "unit": display_temperature_unit,
             }
-            await self._async_save()
             try:
+                await self._async_save()
                 await self.hass.services.async_call(
                     CLIMATE_DOMAIN,
                     SERVICE_SET_TEMPERATURE,
                     {ATTR_ENTITY_ID: entity_id, ATTR_TEMPERATURE: target},
                     blocking=True,
                 )
-            except HomeAssistantError as ex:
+            except Exception as ex:
+                # A rejected write must leave the last accepted target owned.
+                if marker is None:
+                    self._controlled_climates.pop(entity_id, None)
+                else:
+                    self._controlled_climates[entity_id] = marker
+                await self._async_save()
+                if not isinstance(ex, HomeAssistantError):
+                    raise
                 _LOGGER.warning(
                     "Unable to set External Room Control target for %s: %s",
                     entity_id,

@@ -15,6 +15,7 @@ from aioWiserHeatAPI.exceptions import (
 )
 from aioWiserHeatAPI.wiserhub import WiserAPI
 import voluptuous as vol
+from homeassistant.components.climate.const import ATTR_HVAC_MODES, HVACMode
 
 from homeassistant import config_entries, exceptions
 from homeassistant.const import (
@@ -31,6 +32,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers import area_registry as ar, entity_registry as er
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.selector import (
     BooleanSelector,
     EntitySelector,
@@ -122,6 +124,7 @@ from .opentherm_detection import (
 )
 from .helpers import (
     active_wiser_rooms,
+    external_climates_assigned_to_other_hubs,
     room_has_climate,
     room_supports_external_temperature_feedback,
     room_supports_temperature_control,
@@ -633,6 +636,15 @@ class WiserOptionsFlowHandler(config_entries.OptionsFlow):
         area_registry = ar.async_get(self.hass)
         entries = list(entity_registry.entities.values())
         entities_by_room = {}
+        get_effective_area_id = getattr(er, "async_get_effective_area_id", None)
+
+        def entity_area_id(entry):
+            if get_effective_area_id is not None:
+                return get_effective_area_id(self.hass, entry)
+            if entry.area_id is not None or entry.device_id is None:
+                return entry.area_id
+            device = dr.async_get(self.hass).async_get(entry.device_id)
+            return device.area_id if device is not None else None
 
         def supported_external_entity(entry):
             if entry.entity_id.startswith("climate."):
@@ -640,6 +652,7 @@ class WiserOptionsFlowHandler(config_entries.OptionsFlow):
                 return bool(
                     state is not None
                     and ATTR_TEMPERATURE in state.attributes
+                    and HVACMode.HEAT in state.attributes.get(ATTR_HVAC_MODES, ())
                 )
             return bool(
                 entry.entity_id.startswith("sensor.")
@@ -658,7 +671,7 @@ class WiserOptionsFlowHandler(config_entries.OptionsFlow):
                 for entry in entries
                 if area is not None
                 and entry.platform != DOMAIN
-                and er.async_get_effective_area_id(self.hass, entry) == area.id
+                and entity_area_id(entry) == area.id
                 and supported_external_entity(entry)
             )
         return entities_by_room
@@ -762,7 +775,13 @@ class WiserOptionsFlowHandler(config_entries.OptionsFlow):
                     errors["base"] = "external_climate_must_not_be_wiser"
                 if entity_ids:
                     submitted_assignments[room_id] = entity_ids
-            if _external_room_control_duplicate_entities(submitted_assignments):
+            assigned_to_other_hubs = external_climates_assigned_to_other_hubs(
+                self.hass, self.config_entry.entry_id
+            )
+            if _external_room_control_duplicate_entities(submitted_assignments) or any(
+                assigned_to_other_hubs.intersection(entity_ids)
+                for entity_ids in submitted_assignments.values()
+            ):
                 errors["base"] = "external_climate_duplicate_assignment"
             if not errors:
                 for room_id in submitted_assignments:
@@ -874,7 +893,11 @@ class WiserOptionsFlowHandler(config_entries.OptionsFlow):
             data_schema[
                 vol.Optional(
                     field_name,
-                    default=sensor_assignments.get(room_id),
+                    description=(
+                        {"suggested_value": sensor_assignments[room_id]}
+                        if room_id in sensor_assignments
+                        else None
+                    ),
                 )
             ] = EntitySelector(
                 EntitySelectorConfig(

@@ -70,6 +70,8 @@ class UIOptionsTest(unittest.IsolatedAsyncioTestCase):
         self.namespace = {
             "CONF_ADDITIONAL_SENSORS": "additional_sensors",
             "ATTR_TEMPERATURE": "temperature",
+            "ATTR_HVAC_MODES": "hvac_modes",
+            "HVACMode": SimpleNamespace(HEAT="heat"),
             "CONF_AUTOMATIONS_EXTERNAL_ROOM_CONTROL": (
                 "automations_external_room_control"
             ),
@@ -1002,6 +1004,12 @@ class UIOptionsTest(unittest.IsolatedAsyncioTestCase):
                 original_device_class=None,
             ),
             SimpleNamespace(
+                entity_id="climate.office_ac",
+                platform="mqtt",
+                area_id="office",
+                original_device_class=None,
+            ),
+            SimpleNamespace(
                 entity_id="switch.office",
                 platform="mqtt",
                 area_id="office",
@@ -1022,7 +1030,8 @@ class UIOptionsTest(unittest.IsolatedAsyncioTestCase):
             SimpleNamespace(
                 entity_id="sensor.external_temperature",
                 platform="mqtt",
-                area_id="office",
+                area_id=None,
+                device_id="office_sensor",
                 original_device_class="temperature",
             ),
             SimpleNamespace(
@@ -1056,9 +1065,11 @@ class UIOptionsTest(unittest.IsolatedAsyncioTestCase):
         )
         self.namespace.update(
             ar=SimpleNamespace(async_get=lambda _hass: area_registry),
-            er=SimpleNamespace(
-                async_get=lambda _hass: entity_registry,
-                async_get_effective_area_id=lambda _hass, entry: entry.area_id,
+            er=SimpleNamespace(async_get=lambda _hass: entity_registry),
+            dr=SimpleNamespace(
+                async_get=lambda _hass: SimpleNamespace(
+                    async_get={"office_sensor": SimpleNamespace(area_id="office")}.get
+                ),
             ),
         )
         functions = load_functions(
@@ -1068,13 +1079,16 @@ class UIOptionsTest(unittest.IsolatedAsyncioTestCase):
         )
         states = {
             "climate.office_trv": SimpleNamespace(
-                attributes={"temperature": 20.0}
+                attributes={"temperature": 20.0, "hvac_modes": ["heat", "off"]}
             ),
             "climate.office_range": SimpleNamespace(
                 attributes={"target_temp_low": 18.0, "target_temp_high": 24.0}
             ),
             "climate.bedroom_trv": SimpleNamespace(
-                attributes={"temperature": 19.0}
+                attributes={"temperature": 19.0, "hvac_modes": ["heat", "off"]}
+            ),
+            "climate.office_ac": SimpleNamespace(
+                attributes={"temperature": 23.0, "hvac_modes": ["cool", "off"]}
             ),
         }
         flow = SimpleNamespace(
@@ -1212,6 +1226,44 @@ class UIOptionsTest(unittest.IsolatedAsyncioTestCase):
         result = await functions.async_step_external_temperature_sensors(flow)
 
         self.assertEqual(result, {"reason": "no_external_temperature_rooms"})
+
+    async def test_external_temperature_sensor_fields_have_no_submit_defaults(self):
+        optional = Mock(side_effect=lambda name, **_kwargs: name)
+        self.namespace.update(
+            vol=SimpleNamespace(Optional=optional, Schema=dict),
+            EntitySelector=lambda config: config,
+            EntitySelectorConfig=dict,
+        )
+        functions = load_functions(
+            "config_flow.py",
+            {"async_step_external_temperature_sensors"},
+            self.namespace,
+        )
+        flow = SimpleNamespace(
+            _external_room_control_form_rooms=lambda: (
+                {"Office": "1", "Bedroom": "2"},
+                {"1": ["sensor.office"], "2": ["sensor.bedroom"]},
+            ),
+            _external_temperature_sensor_room_ids=lambda: {"1", "2"},
+            _external_temperature_common_schema=lambda _options: {},
+            config_entry=SimpleNamespace(
+                options={
+                    "automations_external_room_control": {
+                        "external_temperature_sensor_assignments": {
+                            "1": "sensor.office"
+                        }
+                    }
+                }
+            ),
+            async_show_form=lambda **kwargs: kwargs,
+        )
+
+        await functions.async_step_external_temperature_sensors(flow)
+
+        optional.assert_any_call(
+            "Office", description={"suggested_value": "sensor.office"}
+        )
+        optional.assert_any_call("Bedroom", description=None)
 
     def test_room_has_wiser_temperature_sensor_supports_both_sensor_types(self):
         functions = load_functions(
