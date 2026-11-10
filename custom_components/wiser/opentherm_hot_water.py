@@ -8,10 +8,7 @@ import logging
 from math import isfinite
 from uuid import uuid4
 
-from homeassistant.components.climate.const import (
-    ClimateEntityStateAttribute,
-    HVACAction,
-)
+from homeassistant.components.climate.const import HVACAction
 from homeassistant.components.water_heater import (
     WaterHeaterEntity,
     WaterHeaterEntityFeature,
@@ -347,7 +344,7 @@ class WiserOpenThermHotWater(
             "custom_ui_more_info": "opentherm-hot-water-control-more-info",
             "opentherm_presets": self._presets,
             "boost_return_operation": self._boost_return_operation,
-            ClimateEntityStateAttribute.HVAC_ACTION: current_action,
+            "current_action": current_action,
             "schedule_id": LOCAL_HOT_WATER_SCHEDULE_ID,
             "schedule_name": self._schedule.name,
             "next_schedule_event": next_event,

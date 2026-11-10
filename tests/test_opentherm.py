@@ -68,9 +68,6 @@ class HotWaterCurrentActionTest(unittest.TestCase):
             "opentherm_sensor_value": HELPER.opentherm_sensor_value,
             "LOCAL_HOT_WATER_SCHEDULE_ID": -1000,
             "HVACAction": SimpleNamespace(IDLE="idle", HEATING="heating"),
-            "ClimateEntityStateAttribute": SimpleNamespace(
-                HVAC_ACTION="hvac_action"
-            ),
         }
         exec(
             compile(ast.Module(body=methods, type_ignores=[]), "<hot water>", "exec"),
@@ -108,7 +105,7 @@ class HotWaterCurrentActionTest(unittest.TestCase):
                 )
                 self.assertIsNone(self.properties["current_action"].fget(entity))
 
-    def test_action_uses_native_hvac_action_attribute(self):
+    def test_current_action_is_exposed_for_tile_cards(self):
         for status, action, hot_water_active, flame_active in (
             (4, "heating", True, False),
             (8, "idle", False, True),
@@ -127,11 +124,25 @@ class HotWaterCurrentActionTest(unittest.TestCase):
                 )
                 entity.current_action = self.properties["current_action"].fget(entity)
                 attributes = self.properties["extra_state_attributes"].fget(entity)
-                self.assertEqual(attributes["hvac_action"], action)
+                self.assertEqual(attributes["current_action"], action)
                 self.assertIs(attributes["is_heating"], hot_water_active is True)
                 self.assertIs(attributes["hot_water_active"], hot_water_active)
                 self.assertIs(attributes["flame_active"], flame_active)
                 self.assertEqual(attributes["next_schedule_temp"], 49)
+
+    def test_current_action_translations_cover_every_language(self):
+        expected_states = {"idle", "heating"}
+
+        for path in (COMPONENT / "translations").glob("*.json"):
+            with self.subTest(language=path.stem):
+                translations = json.loads(path.read_text())
+                current_action = translations["entity"]["water_heater"][
+                    "opentherm_hot_water"
+                ]["state_attributes"]["current_action"]
+
+                self.assertTrue(current_action["name"])
+                self.assertEqual(set(current_action["state"]), expected_states)
+                self.assertTrue(all(current_action["state"].values()))
 
 
 def _system(generation=2, firmware="4.48.2", device_firmware="1.0.0"):
